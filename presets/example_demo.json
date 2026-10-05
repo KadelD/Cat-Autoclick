@@ -1,0 +1,60 @@
+{
+  "id": "demo000001",
+  "name": "Demo Click",
+  "monitor_index": 0,
+  "loop_count": 1,
+  "jitter_ms": 10,
+  "play_hotkey": "F8",
+  "record_hotkey": "F9",
+  "stop_hotkey": "F10",
+  "actions": [
+    {
+      "type": "delay",
+      "id": "a1",
+      "x": null,
+      "y": null,
+      "button": null,
+      "click_phase": "click",
+      "key": null,
+      "keys": [],
+      "key_phase": "tap",
+      "hold_ms": 0,
+      "delay_ms": 500,
+      "delay_min_ms": null,
+      "delay_max_ms": null,
+      "after_ms": 0
+    },
+    {
+      "type": "mouse_move",
+      "id": "a2",
+      "x": 200,
+      "y": 200,
+      "button": null,
+      "click_phase": "click",
+      "key": null,
+      "keys": [],
+      "key_phase": "tap",
+      "hold_ms": 0,
+      "delay_ms": 50,
+      "delay_min_ms": null,
+      "delay_max_ms": null,
+      "after_ms": 0
+    },
+    {
+      "type": "mouse_click",
+      "id": "a3",
+      "x": 200,
+      "y": 200,
+      "button": "left",
+      "click_phase": "click",
+      "key": null,
+      "keys": [],
+      "key_phase": "tap",
+      "hold_ms": 0,
+      "delay_ms": 100,
+      "delay_min_ms": null,
+      "delay_max_ms": null,
+      "after_ms": 0
+    }
+  ]
+}
