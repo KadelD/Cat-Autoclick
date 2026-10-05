@@ -5,7 +5,7 @@ Guidance for coding agents working in this repository.
 ## Stack
 
 - Python 3.11+
-- UI: CustomTkinter (`app/ui/`)
+- UI: CustomTkinter (`app/ui/`) with space-dark tokens in `app/ui/theme.py`
 - Input: pynput (`app/core/player.py`, `app/core/recorder.py`)
 - Displays: screeninfo (`app/core/monitors.py`)
 - Persistence: JSON files in `presets/` via `app/core/store.py`
@@ -43,4 +43,6 @@ There is no separate typecheck/lint script yet; keep modules small and typed wit
 - Stop must release held keys/buttons (`MacroPlayer._release_all`).
 - Coordinates are monitor-local; convert with `to_global` / `to_local` in `monitors.py`.
 - `project_root()` in `store.py` must keep working for both source runs and frozen `.exe` (presets next to the executable).
+- Keep Actions and Add step side-by-side in `ActionEditor` so the action list never collapses when the form grows; Add step scrolls on its own column.
+- Theme palette priority: black → navy → cyan → purple → white (`app/ui/theme.py`).
 - Update this file and `README.md` when behavior, layout, or commands change.

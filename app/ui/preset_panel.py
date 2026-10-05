@@ -8,6 +8,7 @@ from uuid import uuid4
 import customtkinter as ctk
 
 from app.core.models import Preset
+from app.ui import theme as T
 
 SelectCallback = Callable[[Preset | None], None]
 MutateCallback = Callable[[], None]
@@ -23,30 +24,68 @@ class PresetPanel(ctk.CTkFrame):
         on_changed: MutateCallback,
         **kwargs,
     ) -> None:
+        kwargs.setdefault("fg_color", T.PANEL)
+        kwargs.setdefault("corner_radius", 14)
         super().__init__(master, **kwargs)
         self._on_select = on_select
         self._on_changed = on_changed
         self._presets: list[Preset] = []
         self._selected_id: str | None = None
 
-        title = ctk.CTkLabel(self, text="Presets", font=ctk.CTkFont(size=16, weight="bold"))
-        title.pack(anchor="w", padx=12, pady=(12, 6))
+        title = ctk.CTkLabel(
+            self,
+            text="Presets",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=T.CYAN,
+        )
+        title.pack(anchor="w", padx=14, pady=(14, 6))
 
-        self._list = ctk.CTkScrollableFrame(self, width=220, height=360)
-        self._list.pack(fill="both", expand=True, padx=8, pady=4)
+        self._list = ctk.CTkScrollableFrame(
+            self,
+            width=220,
+            fg_color=T.PANEL_ALT,
+            corner_radius=10,
+            scrollbar_button_color=T.NAVY,
+            scrollbar_button_hover_color=T.PURPLE_DIM,
+        )
+        self._list.pack(fill="both", expand=True, padx=10, pady=4)
         self._buttons: dict[str, ctk.CTkButton] = {}
 
         bar = ctk.CTkFrame(self, fg_color="transparent")
-        bar.pack(fill="x", padx=8, pady=8)
-        ctk.CTkButton(bar, text="New", width=50, command=self._new).pack(side="left", padx=2)
-        ctk.CTkButton(bar, text="Dup", width=50, command=self._dup).pack(side="left", padx=2)
-        ctk.CTkButton(bar, text="Del", width=50, command=self._del).pack(side="left", padx=2)
+        bar.pack(fill="x", padx=10, pady=8)
+        for text, cmd in (("New", self._new), ("Dup", self._dup), ("Del", self._del)):
+            ctk.CTkButton(
+                bar,
+                text=text,
+                width=58,
+                height=30,
+                fg_color=T.NAVY,
+                hover_color=T.PURPLE_DIM,
+                text_color=T.WHITE,
+                command=cmd,
+            ).pack(side="left", padx=3)
 
         rename_row = ctk.CTkFrame(self, fg_color="transparent")
-        rename_row.pack(fill="x", padx=8, pady=(0, 10))
-        self._rename_entry = ctk.CTkEntry(rename_row, placeholder_text="Rename…")
-        self._rename_entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
-        ctk.CTkButton(rename_row, text="Rename", width=70, command=self._rename).pack(side="left")
+        rename_row.pack(fill="x", padx=10, pady=(0, 12))
+        self._rename_entry = ctk.CTkEntry(
+            rename_row,
+            placeholder_text="Rename…",
+            fg_color=T.INPUT,
+            border_color=T.BORDER,
+            text_color=T.WHITE,
+            placeholder_text_color=T.MUTED,
+        )
+        self._rename_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        ctk.CTkButton(
+            rename_row,
+            text="Rename",
+            width=74,
+            height=30,
+            fg_color=T.PURPLE,
+            hover_color=T.PURPLE_DIM,
+            text_color=T.WHITE,
+            command=self._rename,
+        ).pack(side="left")
 
     def set_presets(self, presets: list[Preset], selected_id: str | None = None) -> None:
         self._presets = list(presets)
@@ -77,9 +116,12 @@ class PresetPanel(ctk.CTkFrame):
                 self._list,
                 text=preset.name,
                 anchor="w",
-                fg_color=("#3a7ebf" if is_sel else ("gray75", "gray30")),
-                text_color=("white" if is_sel else ("gray10", "gray90")),
-                hover_color=("#2d6aa3", "#1f538d"),
+                height=34,
+                fg_color=T.PURPLE if is_sel else T.BG,
+                hover_color=T.PURPLE_DIM if is_sel else T.NAVY,
+                text_color=T.WHITE,
+                border_width=1,
+                border_color=T.CYAN if is_sel else T.BORDER,
                 command=lambda pid=preset.id: self._pick(pid),
             )
             btn.pack(fill="x", pady=3, padx=2)

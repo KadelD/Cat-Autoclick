@@ -10,8 +10,10 @@ from app.core.monitors import list_monitors
 from app.core.player import MacroPlayer
 from app.core.recorder import MacroRecorder
 from app.core.store import PresetStore
+from app.ui import theme as T
 from app.ui.action_editor import ActionEditor
 from app.ui.preset_panel import PresetPanel
+from app.ui.theme import apply_app_theme
 
 
 class MainWindow(ctk.CTk):
@@ -20,11 +22,10 @@ class MainWindow(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Cat Autoclick")
-        self.geometry("1080x720")
-        self.minsize(900, 600)
-
-        ctk.set_appearance_mode("light")
-        ctk.set_default_color_theme("blue")
+        self.geometry("1180x760")
+        self.minsize(980, 640)
+        apply_app_theme()
+        self.configure(fg_color=T.BG)
 
         self.store = PresetStore()
         self.store.ensure_default()
@@ -50,6 +51,30 @@ class MainWindow(ctk.CTk):
             self.editor.set_preset(self._current)
             self._sync_controls_from_preset()
 
+    def _menu(self, master: ctk.CTkBaseClass, values: list[str], command=None) -> ctk.CTkOptionMenu:
+        """Create a themed option menu."""
+        return ctk.CTkOptionMenu(
+            master,
+            values=values,
+            command=command,
+            fg_color=T.NAVY,
+            button_color=T.PURPLE_DIM,
+            button_hover_color=T.PURPLE,
+            dropdown_fg_color=T.PANEL,
+            dropdown_hover_color=T.NAVY,
+            text_color=T.WHITE,
+        )
+
+    def _entry(self, master: ctk.CTkBaseClass, width: int = 70) -> ctk.CTkEntry:
+        """Create a themed entry field."""
+        return ctk.CTkEntry(
+            master,
+            width=width,
+            fg_color=T.INPUT,
+            border_color=T.BORDER,
+            text_color=T.WHITE,
+        )
+
     def _build(self) -> None:
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -58,17 +83,16 @@ class MainWindow(ctk.CTk):
             self,
             on_select=self._on_select_preset,
             on_changed=self._on_presets_mutated,
-            width=240,
+            width=250,
         )
-        self.preset_panel.grid(row=0, column=0, sticky="nsw", padx=(12, 6), pady=12)
+        self.preset_panel.grid(row=0, column=0, sticky="nsw", padx=(14, 8), pady=14)
 
         center = ctk.CTkFrame(self, fg_color="transparent")
-        center.grid(row=0, column=1, sticky="nsew", padx=6, pady=12)
+        center.grid(row=0, column=1, sticky="nsew", padx=(0, 14), pady=14)
         center.grid_rowconfigure(1, weight=1)
         center.grid_columnconfigure(0, weight=1)
 
-        # Top controls
-        top = ctk.CTkFrame(center)
+        top = ctk.CTkFrame(center, fg_color=T.PANEL, corner_radius=14)
         top.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         top.grid_columnconfigure(3, weight=1)
 
@@ -76,75 +100,117 @@ class MainWindow(ctk.CTk):
             top,
             text="Cat Autoclick",
             font=ctk.CTkFont(size=22, weight="bold"),
+            text_color=T.WHITE,
         )
-        brand.grid(row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(10, 2))
+        brand.grid(row=0, column=0, columnspan=2, sticky="w", padx=14, pady=(12, 2))
         subtitle = ctk.CTkLabel(
             top,
             text="Record or build macros · keyboard, mouse, chords & holds",
-            text_color=("gray40", "gray70"),
+            text_color=T.MUTED,
         )
-        subtitle.grid(row=1, column=0, columnspan=4, sticky="w", padx=12, pady=(0, 8))
+        subtitle.grid(row=1, column=0, columnspan=4, sticky="w", padx=14, pady=(0, 8))
 
-        ctk.CTkLabel(top, text="Monitor").grid(row=2, column=0, sticky="w", padx=12, pady=6)
-        self.monitor_menu = ctk.CTkOptionMenu(top, values=["0"], command=self._on_monitor_change)
+        ctk.CTkLabel(top, text="Monitor", text_color=T.MUTED).grid(
+            row=2, column=0, sticky="w", padx=14, pady=6
+        )
+        self.monitor_menu = self._menu(top, ["0"], command=self._on_monitor_change)
         self.monitor_menu.grid(row=2, column=1, sticky="w", padx=4, pady=6)
 
-        ctk.CTkLabel(top, text="Loops (0=∞)").grid(row=2, column=2, sticky="w", padx=12, pady=6)
-        self.loop_entry = ctk.CTkEntry(top, width=70)
+        ctk.CTkLabel(top, text="Loops (0=∞)", text_color=T.MUTED).grid(
+            row=2, column=2, sticky="w", padx=12, pady=6
+        )
+        self.loop_entry = self._entry(top)
         self.loop_entry.insert(0, "1")
         self.loop_entry.grid(row=2, column=3, sticky="w", padx=4, pady=6)
         self.loop_entry.bind("<FocusOut>", lambda _e: self._apply_loop())
 
-        ctk.CTkLabel(top, text="Jitter ms").grid(row=3, column=0, sticky="w", padx=12, pady=6)
-        self.jitter_entry = ctk.CTkEntry(top, width=70)
+        ctk.CTkLabel(top, text="Jitter ms", text_color=T.MUTED).grid(
+            row=3, column=0, sticky="w", padx=14, pady=(6, 12)
+        )
+        self.jitter_entry = self._entry(top)
         self.jitter_entry.insert(0, "10")
-        self.jitter_entry.grid(row=3, column=1, sticky="w", padx=4, pady=6)
+        self.jitter_entry.grid(row=3, column=1, sticky="w", padx=4, pady=(6, 12))
         self.jitter_entry.bind("<FocusOut>", lambda _e: self._apply_jitter())
 
         self.status_label = ctk.CTkLabel(
             top,
             text="Ready",
-            font=ctk.CTkFont(size=13),
-            text_color=("#1f6aa5", "#8ab4f8"),
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=T.CYAN,
         )
-        self.status_label.grid(row=3, column=2, columnspan=2, sticky="w", padx=12, pady=6)
+        self.status_label.grid(row=3, column=2, columnspan=2, sticky="w", padx=12, pady=(6, 12))
 
-        # Action editor
-        self.editor = ActionEditor(center, on_changed=self._mark_dirty)
+        self.editor = ActionEditor(
+            center,
+            on_changed=self._mark_dirty,
+            on_status=self.set_status,
+        )
         self.editor.grid(row=1, column=0, sticky="nsew")
 
-        # Playback bar
-        bar = ctk.CTkFrame(center)
+        bar = ctk.CTkFrame(center, fg_color=T.PANEL, corner_radius=14)
         bar.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         self.btn_record = ctk.CTkButton(
-            bar, text="Record (F9)", width=120, fg_color="#c0392b", hover_color="#a93226",
+            bar,
+            text="Record (F9)",
+            width=120,
+            height=36,
+            fg_color=T.RECORD,
+            hover_color=T.RECORD_HOVER,
+            text_color=T.WHITE,
             command=self.toggle_record,
         )
-        self.btn_record.pack(side="left", padx=8, pady=10)
+        self.btn_record.pack(side="left", padx=(12, 6), pady=12)
         self.btn_play = ctk.CTkButton(
-            bar, text="Play (F8)", width=110, command=self.toggle_play,
+            bar,
+            text="Play (F8)",
+            width=110,
+            height=36,
+            fg_color=T.CYAN_DIM,
+            hover_color=T.CYAN,
+            text_color=T.BG,
+            command=self.toggle_play,
         )
-        self.btn_play.pack(side="left", padx=4, pady=10)
+        self.btn_play.pack(side="left", padx=4, pady=12)
         self.btn_pause = ctk.CTkButton(
-            bar, text="Pause", width=90, command=self.player.toggle_pause,
+            bar,
+            text="Pause",
+            width=90,
+            height=36,
+            fg_color=T.NAVY,
+            hover_color=T.PURPLE_DIM,
+            text_color=T.WHITE,
+            command=self.player.toggle_pause,
         )
-        self.btn_pause.pack(side="left", padx=4, pady=10)
+        self.btn_pause.pack(side="left", padx=4, pady=12)
         self.btn_stop = ctk.CTkButton(
-            bar, text="Stop (F10)", width=100, fg_color="#566573", hover_color="#2c3e50",
+            bar,
+            text="Stop (F10)",
+            width=100,
+            height=36,
+            fg_color=T.STOP,
+            hover_color=T.STOP_HOVER,
+            text_color=T.WHITE,
             command=self.stop_all,
         )
-        self.btn_stop.pack(side="left", padx=4, pady=10)
-        ctk.CTkButton(bar, text="Save", width=80, command=self.save_all).pack(
-            side="right", padx=8, pady=10
-        )
+        self.btn_stop.pack(side="left", padx=4, pady=12)
+        ctk.CTkButton(
+            bar,
+            text="Save",
+            width=90,
+            height=36,
+            fg_color=T.PURPLE,
+            hover_color=T.PURPLE_DIM,
+            text_color=T.WHITE,
+            command=self.save_all,
+        ).pack(side="right", padx=12, pady=12)
 
         hint = ctk.CTkLabel(
             center,
             text="Hotkeys: F8 play/stop · F9 record/stop · F10 stop all  ·  Coordinates are relative to the selected monitor",
-            text_color=("gray45", "gray65"),
-            font=ctk.CTkFont(size=12),
+            text_color=T.MUTED,
+            font=ctk.CTkFont(size=11),
         )
-        hint.grid(row=3, column=0, sticky="w", pady=(6, 0), padx=4)
+        hint.grid(row=3, column=0, sticky="w", pady=(8, 0), padx=4)
 
     def _load_monitors(self) -> None:
         monitors = list_monitors()
@@ -214,7 +280,6 @@ class MainWindow(ctk.CTk):
 
     def _on_presets_mutated(self) -> None:
         self._presets = self.preset_panel.presets
-        # Track deletes relative to disk
         disk_ids = {p.id for p in self.store.list_presets()}
         live_ids = {p.id for p in self._presets}
         self._deleted_ids |= disk_ids - live_ids
@@ -239,7 +304,6 @@ class MainWindow(ctk.CTk):
         for preset in self._presets:
             self.store.save(preset)
         self._dirty_ids.clear()
-        # Reload to sync filenames after rename
         selected = self._current.id if self._current else None
         self._presets = self.store.list_presets()
         self.preset_panel.set_presets(self._presets, selected)
@@ -251,7 +315,12 @@ class MainWindow(ctk.CTk):
         self.status_label.configure(text=message)
 
     def _status_from_thread(self, message: str) -> None:
-        self.after(0, lambda: self.set_status(message))
+        def _apply() -> None:
+            self.set_status(message)
+            if message in ("Finished", "Stopped") or message.startswith("Hotkeys"):
+                self._set_play_idle()
+
+        self.after(0, _apply)
 
     def _action_from_thread(self, action) -> None:
         self.after(0, lambda: self.editor.append_action(action))
@@ -279,6 +348,7 @@ class MainWindow(ctk.CTk):
     def toggle_play(self) -> None:
         if self.player.is_running:
             self.player.stop()
+            self._set_play_idle()
             return
         if self.recorder.is_recording:
             self.recorder.stop()
@@ -290,6 +360,21 @@ class MainWindow(ctk.CTk):
         self._apply_jitter()
         self._current.monitor_index = self._monitor_index_from_menu()
         self.player.play(self._current)
+        self.btn_play.configure(
+            text="Stop (F8)",
+            fg_color=T.NAVY,
+            hover_color=T.PURPLE_DIM,
+            text_color=T.WHITE,
+        )
+
+    def _set_play_idle(self) -> None:
+        """Reset Play button to the idle cyan style."""
+        self.btn_play.configure(
+            text="Play (F8)",
+            fg_color=T.CYAN_DIM,
+            hover_color=T.CYAN,
+            text_color=T.BG,
+        )
 
     def stop_all(self) -> None:
         if self.recorder.is_recording:
@@ -297,10 +382,10 @@ class MainWindow(ctk.CTk):
             self.btn_record.configure(text="Record (F9)")
         if self.player.is_running:
             self.player.stop()
+        self._set_play_idle()
         self.set_status("Stopped")
 
     def _bind_hotkeys(self) -> None:
-        # Global hotkeys use pynput GlobalHotKeys
         mapping = {
             "<f8>": lambda: self.after(0, self.toggle_play),
             "<f9>": lambda: self.after(0, self.toggle_record),
