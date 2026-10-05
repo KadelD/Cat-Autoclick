@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 import threading
 import time
@@ -23,7 +24,9 @@ from app.core.models import (
     OnFail,
     Preset,
 )
+from app.core import mouse_input
 from app.core.monitors import to_global
+from app.core.settings import get_settings
 from app.core.vision import CaptureSpec, find_template, find_text_boxes, is_ocr_enabled
 
 StatusCallback = Callable[[str], None]
@@ -325,15 +328,17 @@ class MacroPlayer:
 
         if action.type == ActionType.MOUSE_MOVE:
             gx, gy = to_global(monitor_index, int(action.x or 0), int(action.y or 0))
-            self._mouse.position = (gx, gy)
-            return False
+            return not self._move_to_global(gx, gy)
 
         if action.type == ActionType.MOUSE_DRAG:
             return self._exec_drag(action, monitor_index)
 
         if action.type == ActionType.MOUSE_CLICK:
             gx, gy = to_global(monitor_index, int(action.x or 0), int(action.y or 0))
-            self._mouse.position = (gx, gy)
+            if not self._move_to_global(gx, gy):
+                return True
+            if action.click_phase != ClickPhase.UP and not self._hover_before_click():
+                return True
             btn = MOUSE_BUTTONS[action.button or MouseButton.LEFT]
             if action.click_phase == ClickPhase.DOWN:
                 self._mouse.press(btn)
@@ -379,7 +384,8 @@ class MacroPlayer:
                 btn = MOUSE_BUTTONS[action.button or MouseButton.LEFT]
                 if action.x is not None and action.y is not None:
                     gx, gy = to_global(monitor_index, int(action.x), int(action.y))
-                    self._mouse.position = (gx, gy)
+                    if not self._move_to_global(gx, gy):
+                        return True
                 self._mouse.press(btn)
                 self._track_button(btn, pressed=True)
                 if not self._wait_interruptible(action.hold_ms / 1000.0):
@@ -391,10 +397,107 @@ class MacroPlayer:
         return False
 
     def _click_local(self, monitor_index: int, x: int, y: int, button: MouseButton | None) -> None:
-        """Click at monitor-local coordinates."""
+        """Click at monitor-local coordinates (humanized SendInput move when enabled)."""
         gx, gy = to_global(monitor_index, x, y)
-        self._mouse.position = (gx, gy)
+        if not self._move_to_global(gx, gy):
+            return
+        if not self._hover_before_click():
+            return
         self._mouse.click(MOUSE_BUTTONS[button or MouseButton.LEFT], 1)
+
+    def _set_cursor(self, gx: int, gy: int) -> None:
+        """Place cursor using SendInput on Windows; fall back to pynput elsewhere."""
+        if mouse_input.uses_sendinput():
+            mouse_input.move_absolute(int(gx), int(gy))
+        else:
+            self._mouse.position = (int(gx), int(gy))
+
+    def _cursor_xy(self) -> tuple[int, int]:
+        """Read cursor position (prefer Win32 when available)."""
+        if mouse_input.uses_sendinput():
+            try:
+                return mouse_input.cursor_pos()
+            except OSError:
+                pass
+        try:
+            x0, y0 = self._mouse.position
+            return int(x0), int(y0)
+        except Exception:
+            return 0, 0
+
+    def _hover_before_click(self) -> bool:
+        """Brief dwell after arriving at target (hover / enter gates)."""
+        ms = max(0, int(get_settings().mouse_hover_ms))
+        if ms <= 0:
+            return not self._stop.is_set()
+        # Small random dwell so timing is not identical every click.
+        wait = (ms / 1000.0) * random.uniform(0.85, 1.25)
+        return self._wait_interruptible(wait)
+
+    def _move_to_global(self, gx: int, gy: int) -> bool:
+        """Move cursor to global (gx, gy) via SendInput path. False if stopped."""
+        settings = get_settings()
+        x0, y0 = self._cursor_xy()
+        dx = gx - x0
+        dy = gy - y0
+        dist = (dx * dx + dy * dy) ** 0.5
+        if dist < 1.5 or not settings.humanize_mouse:
+            self._set_cursor(gx, gy)
+            return not self._stop.is_set()
+
+        # If already near the target, back out first so the cursor *enters* the hit box.
+        if dist < 28:
+            back = random.randint(48, 110)
+            angle = random.uniform(0, 6.28318)
+            ax = int(round(gx + math.cos(angle) * back))
+            ay = int(round(gy + math.sin(angle) * back))
+            self._set_cursor(ax, ay)
+            if not self._wait_interruptible(random.uniform(0.02, 0.05)):
+                return False
+            x0, y0 = self._cursor_xy()
+            dx = gx - x0
+            dy = gy - y0
+            dist = max(1.0, (dx * dx + dy * dy) ** 0.5)
+
+        # Duration scales with distance; slight random variation.
+        base_ms = max(40, int(settings.mouse_move_ms))
+        duration = (base_ms / 1000.0) * (0.55 + min(dist, 900.0) / 600.0)
+        duration *= random.uniform(0.85, 1.2)
+        duration = max(0.05, min(3.0, duration))
+
+        curve = max(0.0, min(1.0, float(settings.mouse_curve)))
+        # Quadratic Bezier control point: offset perpendicular to the path.
+        mx = (x0 + gx) / 2.0
+        my = (y0 + gy) / 2.0
+        if dist > 1:
+            nx, ny = -dy / dist, dx / dist
+        else:
+            nx, ny = 0.0, 1.0
+        offset = dist * curve * random.uniform(0.25, 0.85) * random.choice((-1.0, 1.0))
+        cx = mx + nx * offset + random.uniform(-4, 4)
+        cy = my + ny * offset + random.uniform(-4, 4)
+
+        step_s = 1.0 / 120.0
+        steps = max(8, int(duration / step_s))
+        for i in range(1, steps + 1):
+            if self._stop.is_set():
+                return False
+            # Ease-in-out + tiny speed wobble so motion is not perfectly uniform.
+            u = i / steps
+            t = u * u * (3.0 - 2.0 * u)
+            t = max(0.0, min(1.0, t + random.uniform(-0.012, 0.012)))
+            omt = 1.0 - t
+            x = omt * omt * x0 + 2 * omt * t * cx + t * t * gx
+            y = omt * omt * y0 + 2 * omt * t * cy + t * t * gy
+            if i < steps:
+                x += random.uniform(-0.6, 0.6) * curve
+                y += random.uniform(-0.6, 0.6) * curve
+            self._set_cursor(int(round(x)), int(round(y)))
+            if not self._wait_interruptible(duration / steps):
+                return False
+
+        self._set_cursor(gx, gy)
+        return not self._stop.is_set()
 
     def _exec_drag(self, action: Action, monitor_index: int) -> bool:
         """Press, move start→end at constant speed over hold_ms, then release."""
@@ -406,7 +509,8 @@ class MacroPlayer:
         btn = MOUSE_BUTTONS[action.button or MouseButton.LEFT]
         gx0, gy0 = to_global(monitor_index, x0, y0)
         gx1, gy1 = to_global(monitor_index, x1, y1)
-        self._mouse.position = (gx0, gy0)
+        if not self._move_to_global(gx0, gy0):
+            return True
         self._mouse.press(btn)
         self._track_button(btn, pressed=True)
 
@@ -419,7 +523,7 @@ class MacroPlayer:
                 self._track_button(btn, pressed=False)
                 return True
             t = i / steps
-            self._mouse.position = (
+            self._set_cursor(
                 int(gx0 + (gx1 - gx0) * t),
                 int(gy0 + (gy1 - gy0) * t),
             )
@@ -428,7 +532,7 @@ class MacroPlayer:
                 self._track_button(btn, pressed=False)
                 return True
 
-        self._mouse.position = (gx1, gy1)
+        self._set_cursor(gx1, gy1)
         self._mouse.release(btn)
         self._track_button(btn, pressed=False)
         return False

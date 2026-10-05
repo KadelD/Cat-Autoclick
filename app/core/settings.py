@@ -26,6 +26,11 @@ class AppSettings:
     hide_on_record: bool = True
     auto_start: bool = False
     ocr_enabled: bool = True
+    # Playback: Bezier path + Win32 SendInput (not SetCursorPos) before clicks/moves.
+    humanize_mouse: bool = True
+    mouse_move_ms: int = 220  # base duration (~scaled by distance)
+    mouse_curve: float = 0.35  # 0..1 control-point offset strength
+    mouse_hover_ms: int = 60  # dwell at target before click (helps hover gates)
 
     def hotkey_map(self) -> dict[str, str]:
         """Logical action → normalized hotkey string."""
@@ -84,13 +89,28 @@ class AppSettings:
         for key, value in data.items():
             if key not in known:
                 continue
+            default = getattr(base, key)
             if key.startswith("hotkey_"):
                 kwargs[key] = normalize_hotkey(str(value))
-            elif isinstance(getattr(base, key), bool):
+            elif isinstance(default, bool):
                 kwargs[key] = bool(value)
+            elif isinstance(default, int) and not isinstance(default, bool):
+                try:
+                    kwargs[key] = int(value)
+                except (TypeError, ValueError):
+                    kwargs[key] = default
+            elif isinstance(default, float):
+                try:
+                    kwargs[key] = float(value)
+                except (TypeError, ValueError):
+                    kwargs[key] = default
             else:
                 kwargs[key] = value
-        return cls(**{**asdict(base), **kwargs})
+        merged = cls(**{**asdict(base), **kwargs})
+        merged.mouse_move_ms = max(40, min(3000, int(merged.mouse_move_ms)))
+        merged.mouse_curve = max(0.0, min(1.0, float(merged.mouse_curve)))
+        merged.mouse_hover_ms = max(0, min(2000, int(merged.mouse_hover_ms)))
+        return merged
 
 
 # Cached in-process settings (set by load_settings / save_settings).

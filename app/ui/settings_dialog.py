@@ -39,8 +39,8 @@ class SettingsDialog(ctk.CTkToplevel):
     ) -> None:
         super().__init__(master)
         self.title("Settings")
-        self.geometry("460x560")
-        self.minsize(420, 520)
+        self.geometry("460x640")
+        self.minsize(420, 560)
         self.configure(fg_color=T.PANEL)
         self.attributes("-topmost", True)
         self._on_apply = on_apply or (lambda _s: None)
@@ -89,6 +89,57 @@ class SettingsDialog(ctk.CTkToplevel):
         # Reflect OS state if it drifted from the file.
         auto = self._settings.auto_start or read_auto_start_enabled()
         self._auto_start = self._check(body, "Launch with Windows", auto)
+
+        self._section(body, "Mouse playback")
+        self._humanize = self._check(
+            body,
+            "Humanize mouse (Bezier path before click/move)",
+            self._settings.humanize_mouse,
+        )
+        ctk.CTkLabel(
+            body,
+            text="Avoids teleporting the cursor — better for UIs that require real movement.",
+            text_color=T.MUTED,
+            font=ctk.CTkFont(size=11),
+            anchor="w",
+            justify="left",
+        ).pack(fill="x", padx=8, pady=(0, 4))
+        move_row = ctk.CTkFrame(body, fg_color="transparent")
+        move_row.pack(fill="x", padx=8, pady=2)
+        ctk.CTkLabel(move_row, text="Move ms", text_color=T.MUTED, width=80, anchor="w").pack(
+            side="left"
+        )
+        self._move_ms = ctk.CTkEntry(
+            move_row, width=80, fg_color=T.INPUT, border_color=T.BORDER, text_color=T.WHITE
+        )
+        self._move_ms.insert(0, str(self._settings.mouse_move_ms))
+        self._move_ms.pack(side="left", padx=(0, 16))
+        ctk.CTkLabel(move_row, text="Curve 0–1", text_color=T.MUTED, width=80, anchor="w").pack(
+            side="left"
+        )
+        self._curve = ctk.CTkEntry(
+            move_row, width=80, fg_color=T.INPUT, border_color=T.BORDER, text_color=T.WHITE
+        )
+        self._curve.insert(0, str(self._settings.mouse_curve))
+        self._curve.pack(side="left")
+        hover_row = ctk.CTkFrame(body, fg_color="transparent")
+        hover_row.pack(fill="x", padx=8, pady=(4, 2))
+        ctk.CTkLabel(hover_row, text="Hover ms", text_color=T.MUTED, width=80, anchor="w").pack(
+            side="left"
+        )
+        self._hover_ms = ctk.CTkEntry(
+            hover_row, width=80, fg_color=T.INPUT, border_color=T.BORDER, text_color=T.WHITE
+        )
+        self._hover_ms.insert(0, str(self._settings.mouse_hover_ms))
+        self._hover_ms.pack(side="left")
+        ctk.CTkLabel(
+            body,
+            text="On Windows, moves use SendInput (not SetCursorPos) so apps see real motion.",
+            text_color=T.MUTED,
+            font=ctk.CTkFont(size=11),
+            anchor="w",
+            justify="left",
+        ).pack(fill="x", padx=8, pady=(0, 6))
 
         self._section(body, "Vision / OCR")
         self._ocr = self._check(
@@ -233,6 +284,21 @@ class SettingsDialog(ctk.CTkToplevel):
             self._key_listener = None
 
     def _collect(self) -> AppSettings | None:
+        try:
+            move_ms = int(self._move_ms.get().strip())
+        except ValueError:
+            self._error.configure(text="Move ms must be a number")
+            return None
+        try:
+            curve = float(self._curve.get().strip())
+        except ValueError:
+            self._error.configure(text="Curve must be a number between 0 and 1")
+            return None
+        try:
+            hover_ms = int(self._hover_ms.get().strip())
+        except ValueError:
+            self._error.configure(text="Hover ms must be a number")
+            return None
         s = AppSettings(
             hotkey_play=self._settings.hotkey_play,
             hotkey_record=self._settings.hotkey_record,
@@ -243,6 +309,10 @@ class SettingsDialog(ctk.CTkToplevel):
             hide_on_record=self._checked(self._hide_rec),
             auto_start=self._checked(self._auto_start),
             ocr_enabled=self._checked(self._ocr),
+            humanize_mouse=self._checked(self._humanize),
+            mouse_move_ms=max(40, min(3000, move_ms)),
+            mouse_curve=max(0.0, min(1.0, curve)),
+            mouse_hover_ms=max(0, min(2000, hover_ms)),
         )
         err = s.validate_hotkeys()
         if err:

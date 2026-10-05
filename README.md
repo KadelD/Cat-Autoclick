@@ -150,9 +150,13 @@ Toolbar → **Settings**:
 | Start minimized | off | Launch iconified |
 | Hide window while recording | on | HUD still visible |
 | Launch with Windows | off | Current-user Run key (Windows) |
+| Humanize mouse | on | Bezier path before click/move |
+| Move ms / Curve / Hover ms | 220 / 0.35 / 60 | Duration, curve strength, dwell before click |
 | Enable OCR | on | Off = no EasyOCR load; hide OCR types/hotkeys; skip text vision at play |
 
 Image vision still works when OCR is off. Settings live in `settings.json` next to `presets/` (or next to the exe).
+
+On Windows, mouse moves use **SendInput** (not `SetCursorPos`) so apps that require real cursor motion / hover can see the path. Turn Humanize off only if you want a single jump.
 
 ---
 

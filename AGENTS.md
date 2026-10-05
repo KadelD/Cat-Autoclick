@@ -64,6 +64,7 @@ Release prep (agent skill `release-prep`): audit checklist → safe packaging/hy
 - Region picker UI lives in `app/ui/region_picker.py`.
 - Recorder captures drag as a single `mouse_drag` (start→end + total ms); playback moves at constant speed. Double-clicks use `click_count` on `Action`.
 - App Settings UI: `app/ui/settings_dialog.py`; wire via `MainWindow._apply_settings` (rebuild `GlobalHotKeys`, button/HUD labels, `recorder.set_app_hotkeys`, `editor.set_ocr_enabled`).
+- Mouse playback humanize (`humanize_mouse`, `mouse_move_ms`, `mouse_curve`, `mouse_hover_ms`): `MacroPlayer._move_to_global` uses Bezier + ease-in-out, Win32 `SendInput` absolute moves via `mouse_input.py` (not pynput `SetCursorPos`), optional approach-from-outside when already near target, then hover dwell before click.
 - Recording shows `RecordHud` (`app/ui/record_hud.py`); `hide_on_record` controls main-window withdraw. App hotkeys come from settings (defaults Ctrl+F6…F10); plain keys remain recordable. OCR hotkeys → full/area + `OcrCaptureDialog` while `MacroRecorder.pause()`.
 - When OCR is off: hide OCR types/hotkeys; player skips `find_text` / `wait_text` and treats `if_text` as false with a status message; image vision stays available.
 - Windows auto-start uses HKCU `Run` value `CatAutoclick` (`apply_auto_start` in `settings.py`).
