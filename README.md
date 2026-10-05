@@ -2,8 +2,8 @@
 
 **Desktop macro recorder & player for Windows** — record keyboard and mouse, build steps by hand, find text (Thai + English OCR) or images on screen, and branch with if/else.
 
-[![Release](https://img.shields.io/github/v/release/CatKadel/Cat-Autoclick)](https://github.com/CatKadel/Cat-Autoclick/releases)
-[![License](https://img.shields.io/github/license/CatKadel/Cat-Autoclick)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/KadelD/Cat-Autoclick)](https://github.com/KadelD/Cat-Autoclick/releases)
+[![License](https://img.shields.io/github/license/KadelD/Cat-Autoclick)](LICENSE)
 
 > **v1.0.0** — first public release. Prefer **Windows**. macOS/Linux may run with extra input-permission setup.
 
@@ -48,7 +48,7 @@ chmod +x run.sh
 ### Option B — manual venv
 
 ```bash
-git clone https://github.com/CatKadel/Cat-Autoclick.git
+git clone https://github.com/KadelD/Cat-Autoclick.git
 cd Cat-Autoclick
 py -3 -m venv .venv
 .venv\Scripts\activate
