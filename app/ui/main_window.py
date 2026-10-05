@@ -5,15 +5,22 @@ from __future__ import annotations
 import customtkinter as ctk
 from pynput import keyboard
 
-from app.core.models import Preset
+from app import __version__
+from app.core.models import Action, Preset
 from app.core.monitors import list_monitors
 from app.core.player import MacroPlayer
 from app.core.recorder import MacroRecorder
+from app.core.settings import AppSettings, load_settings
 from app.core.store import PresetStore
 from app.ui import theme as T
 from app.ui.action_editor import ActionEditor
+from app.ui.ocr_capture_dialog import OcrCaptureDialog
 from app.ui.preset_panel import PresetPanel
+from app.ui.record_hud import RecordHud
+from app.ui.region_picker import pick_region
+from app.ui.settings_dialog import SettingsDialog
 from app.ui.theme import apply_app_theme
+from app.ui.tooltip import HoverTip
 
 
 class MainWindow(ctk.CTk):
@@ -21,12 +28,13 @@ class MainWindow(ctk.CTk):
 
     def __init__(self) -> None:
         super().__init__()
-        self.title("Cat Autoclick")
+        self.title(f"Cat Autoclick {__version__}")
         self.geometry("1180x760")
         self.minsize(980, 640)
         apply_app_theme()
         self.configure(fg_color=T.BG)
 
+        self._settings = load_settings()
         self.store = PresetStore()
         self.store.ensure_default()
         self._presets = self.store.list_presets()
@@ -40,16 +48,27 @@ class MainWindow(ctk.CTk):
             on_status=self._status_from_thread,
         )
         self._hotkey_listener: keyboard.GlobalHotKeys | None = None
+        self._record_hud: RecordHud | None = None
+        self._ocr_busy = False
+        self._pending_record_actions: list[Action] = []
+        self._record_flush_job: str | None = None
+        self._settings_dialog: SettingsDialog | None = None
+        # Hidden host so OCR dialogs/pickers still show while the main window is withdrawn.
+        self._overlay_host = ctk.CTkToplevel(self)
+        self._overlay_host.withdraw()
 
         self._build()
         self._load_monitors()
-        self._bind_hotkeys()
+        self._apply_settings(self._settings, persist_ui_only=True)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         if self._current:
             self.preset_panel.set_presets(self._presets, self._current.id)
             self.editor.set_preset(self._current)
             self._sync_controls_from_preset()
+
+        if self._settings.start_minimized:
+            self.after(80, self.iconify)
 
     def _menu(self, master: ctk.CTkBaseClass, values: list[str], command=None) -> ctk.CTkOptionMenu:
         """Create a themed option menu."""
@@ -151,8 +170,8 @@ class MainWindow(ctk.CTk):
         bar.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         self.btn_record = ctk.CTkButton(
             bar,
-            text="Record (F9)",
-            width=120,
+            text="Record",
+            width=140,
             height=36,
             fg_color=T.RECORD,
             hover_color=T.RECORD_HOVER,
@@ -160,10 +179,11 @@ class MainWindow(ctk.CTk):
             command=self.toggle_record,
         )
         self.btn_record.pack(side="left", padx=(12, 6), pady=12)
+        self._tip_record = HoverTip(self.btn_record, "")
         self.btn_play = ctk.CTkButton(
             bar,
-            text="Play (F8)",
-            width=110,
+            text="Play",
+            width=130,
             height=36,
             fg_color=T.CYAN_DIM,
             hover_color=T.CYAN,
@@ -171,6 +191,7 @@ class MainWindow(ctk.CTk):
             command=self.toggle_play,
         )
         self.btn_play.pack(side="left", padx=4, pady=12)
+        self._tip_play = HoverTip(self.btn_play, "")
         self.btn_pause = ctk.CTkButton(
             bar,
             text="Pause",
@@ -179,13 +200,14 @@ class MainWindow(ctk.CTk):
             fg_color=T.NAVY,
             hover_color=T.PURPLE_DIM,
             text_color=T.WHITE,
-            command=self.player.toggle_pause,
+            command=self._toggle_pause,
+            state="disabled",
         )
         self.btn_pause.pack(side="left", padx=4, pady=12)
         self.btn_stop = ctk.CTkButton(
             bar,
-            text="Stop (F10)",
-            width=100,
+            text="Stop",
+            width=130,
             height=36,
             fg_color=T.STOP,
             hover_color=T.STOP_HOVER,
@@ -193,6 +215,7 @@ class MainWindow(ctk.CTk):
             command=self.stop_all,
         )
         self.btn_stop.pack(side="left", padx=4, pady=12)
+        self._tip_stop = HoverTip(self.btn_stop, "")
         ctk.CTkButton(
             bar,
             text="Save",
@@ -202,15 +225,25 @@ class MainWindow(ctk.CTk):
             hover_color=T.PURPLE_DIM,
             text_color=T.WHITE,
             command=self.save_all,
-        ).pack(side="right", padx=12, pady=12)
+        ).pack(side="right", padx=(6, 12), pady=12)
+        ctk.CTkButton(
+            bar,
+            text="Settings",
+            width=90,
+            height=36,
+            fg_color=T.NAVY,
+            hover_color=T.PURPLE_DIM,
+            text_color=T.WHITE,
+            command=self._open_settings,
+        ).pack(side="right", padx=(12, 0), pady=12)
 
-        hint = ctk.CTkLabel(
+        self.hint_label = ctk.CTkLabel(
             center,
-            text="Hotkeys: F8 play/stop · F9 record/stop · F10 stop all  ·  Coordinates are relative to the selected monitor",
+            text="",
             text_color=T.MUTED,
             font=ctk.CTkFont(size=11),
         )
-        hint.grid(row=3, column=0, sticky="w", pady=(8, 0), padx=4)
+        self.hint_label.grid(row=3, column=0, sticky="w", pady=(8, 0), padx=4)
 
     def _load_monitors(self) -> None:
         monitors = list_monitors()
@@ -313,6 +346,8 @@ class MainWindow(ctk.CTk):
 
     def set_status(self, message: str) -> None:
         self.status_label.configure(text=message)
+        if self._record_hud is not None:
+            self._record_hud.set_status(message)
 
     def _status_from_thread(self, message: str) -> None:
         def _apply() -> None:
@@ -322,13 +357,54 @@ class MainWindow(ctk.CTk):
 
         self.after(0, _apply)
 
-    def _action_from_thread(self, action) -> None:
-        self.after(0, lambda: self.editor.append_action(action))
+    def _action_from_thread(self, action: Action) -> None:
+        """Batch recorded actions onto the UI thread (~60fps) to avoid scroll lag."""
+        self._pending_record_actions.append(action)
+        if self._record_flush_job is None:
+            self._record_flush_job = self.after(16, self._flush_recorded_actions)
+
+    def _flush_recorded_actions(self) -> None:
+        """Append queued recorder actions in one UI tick."""
+        self._record_flush_job = None
+        batch = self._pending_record_actions
+        self._pending_record_actions = []
+        for action in batch:
+            self.editor.append_action(action)
+
+    def _show_record_ui(self) -> None:
+        """Show floating record HUD; optionally hide the main window."""
+        mon = self._current.monitor_index if self._current else 0
+        self._destroy_record_hud()
+        self._record_hud = RecordHud(self, mon, settings=self._settings)
+        if self._settings.hide_on_record:
+            self.withdraw()
+
+    def _restore_main_ui(self) -> None:
+        """Bring the main window back after recording ends."""
+        self._destroy_record_hud()
+        try:
+            self.deiconify()
+            self.lift()
+            self.focus_force()
+        except Exception:
+            pass
+
+    def _destroy_record_hud(self) -> None:
+        if self._record_hud is not None:
+            self._record_hud.destroy()
+            self._record_hud = None
+
+    def _end_record_session(self) -> None:
+        """Stop recorder listeners and restore the main window."""
+        if self.recorder.is_recording:
+            self.recorder.stop()
+        self._refresh_button_labels(recording=False)
+        self._ocr_busy = False
+        self._restore_main_ui()
 
     def toggle_record(self) -> None:
         if self.recorder.is_recording:
-            self.recorder.stop()
-            self.btn_record.configure(text="Record (F9)")
+            self._end_record_session()
             return
         if self.player.is_running:
             self.player.stop()
@@ -336,14 +412,12 @@ class MainWindow(ctk.CTk):
             self.set_status("Create a preset first")
             return
         self._apply_loop()
-        ignore = [
-            self._current.play_hotkey,
-            self._current.record_hotkey,
-            self._current.stop_hotkey,
-        ]
-        self.recorder.set_ignore_hotkeys(ignore)
+        # Chord hotkeys are swallowed by the recorder; do not ignore plain keys.
+        self.recorder.set_ignore_hotkeys([])
         self.recorder.start(self._current.monitor_index)
-        self.btn_record.configure(text="Stop Rec (F9)")
+        self._refresh_button_labels(recording=True)
+        self._show_record_ui()
+        self.set_status("Recording…")
 
     def toggle_play(self) -> None:
         if self.player.is_running:
@@ -351,8 +425,7 @@ class MainWindow(ctk.CTk):
             self._set_play_idle()
             return
         if self.recorder.is_recording:
-            self.recorder.stop()
-            self.btn_record.configure(text="Record (F9)")
+            self._end_record_session()
         if self._current is None:
             self.set_status("No preset selected")
             return
@@ -360,37 +433,230 @@ class MainWindow(ctk.CTk):
         self._apply_jitter()
         self._current.monitor_index = self._monitor_index_from_menu()
         self.player.play(self._current)
+        play_hk = self._settings.display_hotkey("play")
         self.btn_play.configure(
-            text="Stop (F8)",
+            text=f"Stop ({play_hk})",
             fg_color=T.NAVY,
             hover_color=T.PURPLE_DIM,
             text_color=T.WHITE,
         )
+        self._sync_pause_button()
+
+    def _toggle_pause(self) -> None:
+        """Pause/resume playback; ignored when idle."""
+        if not self.player.is_running:
+            return
+        self.player.toggle_pause()
+        self._sync_pause_button()
+
+    def _sync_pause_button(self) -> None:
+        """Enable Pause only while playing; flip label when paused."""
+        if not self.player.is_running:
+            self.btn_pause.configure(text="Pause", state="disabled")
+            return
+        self.btn_pause.configure(
+            text="Resume" if self.player.is_paused else "Pause",
+            state="normal",
+        )
 
     def _set_play_idle(self) -> None:
         """Reset Play button to the idle cyan style."""
+        play_hk = self._settings.display_hotkey("play")
         self.btn_play.configure(
-            text="Play (F8)",
+            text=f"Play ({play_hk})",
             fg_color=T.CYAN_DIM,
             hover_color=T.CYAN,
             text_color=T.BG,
         )
+        self._sync_pause_button()
 
     def stop_all(self) -> None:
         if self.recorder.is_recording:
-            self.recorder.stop()
-            self.btn_record.configure(text="Record (F9)")
+            self._end_record_session()
         if self.player.is_running:
             self.player.stop()
         self._set_play_idle()
         self.set_status("Stopped")
 
+    def _ocr_full(self) -> None:
+        """Insert OCR step for the full preset monitor (while recording)."""
+        if not self._settings.ocr_enabled:
+            self.set_status("OCR is disabled in Settings")
+            return
+        self._begin_ocr_capture(full=True)
+
+    def _ocr_area(self) -> None:
+        """Pick a region then insert an OCR step (while recording)."""
+        if not self._settings.ocr_enabled:
+            self.set_status("OCR is disabled in Settings")
+            return
+        self._begin_ocr_capture(full=False)
+
+    def _begin_ocr_capture(self, full: bool) -> None:
+        if not self.recorder.is_recording or self._ocr_busy or self._current is None:
+            return
+        self._ocr_busy = True
+        self.recorder.pause()
+        mon = self._current.monitor_index
+        if self._record_hud is not None:
+            self._record_hud.set_status("OCR setup…")
+
+        if full:
+            self._open_ocr_dialog(mon, 0, 0, 0, 0)
+            return
+
+        def _done(x: int, y: int, w: int, h: int) -> None:
+            self._open_ocr_dialog(mon, x, y, w, h)
+
+        def _cancel() -> None:
+            self._finish_ocr_flow(resume=True)
+            if self._record_hud is not None:
+                self._record_hud.set_status("Recording…")
+
+        pick_region(self._overlay_host, mon, on_done=_done, on_cancel=_cancel)
+
+    def _open_ocr_dialog(
+        self, monitor_index: int, rx: int, ry: int, rw: int, rh: int
+    ) -> None:
+        """Show OCR settings; clicks/keys here are ignored by the paused recorder."""
+
+        def _ok(action: Action) -> None:
+            self.editor.append_action(action)
+            self._mark_dirty()
+            self._finish_ocr_flow(resume=True)
+            if self._record_hud is not None:
+                self._record_hud.set_status("Recording…")
+            self.set_status(f"Added OCR: {action.summary()}")
+
+        def _cancel() -> None:
+            self._finish_ocr_flow(resume=True)
+            if self._record_hud is not None:
+                self._record_hud.set_status("Recording…")
+
+        OcrCaptureDialog(
+            self._overlay_host,
+            monitor_index=monitor_index,
+            region_x=rx,
+            region_y=ry,
+            region_w=rw,
+            region_h=rh,
+            on_ok=_ok,
+            on_cancel=_cancel,
+        )
+
+    def _finish_ocr_flow(self, resume: bool) -> None:
+        self._ocr_busy = False
+        if resume and self.recorder.is_recording:
+            self.recorder.resume()
+
+    def _open_settings(self) -> None:
+        """Open the app Settings dialog (single instance)."""
+        try:
+            if self._settings_dialog is not None and self._settings_dialog.winfo_exists():
+                self._settings_dialog.lift()
+                self._settings_dialog.focus_force()
+                return
+        except Exception:
+            self._settings_dialog = None
+        self._settings_dialog = SettingsDialog(
+            self,
+            self._settings,
+            on_apply=self._on_settings_saved,
+        )
+
+    def _on_settings_saved(self, settings: AppSettings) -> None:
+        """Apply newly saved settings to listeners and UI."""
+        self._settings_dialog = None
+        self._apply_settings(settings)
+
+    def _apply_settings(self, settings: AppSettings, *, persist_ui_only: bool = False) -> None:
+        """Rebuild hotkeys, labels, OCR gates, and recorder swallow list."""
+        self._settings = settings
+        if not persist_ui_only:
+            # Cache already updated by save_settings; keep local reference.
+            pass
+        self.editor.set_ocr_enabled(settings.ocr_enabled)
+        chords = list(settings.hotkey_map().values())
+        if not settings.ocr_enabled:
+            chords = [
+                settings.hotkey_map()["play"],
+                settings.hotkey_map()["record"],
+                settings.hotkey_map()["stop"],
+            ]
+        self.recorder.set_app_hotkeys(chords)
+        self._refresh_button_labels(recording=self.recorder.is_recording)
+        self._bind_hotkeys()
+        self.set_status("Settings saved" if not persist_ui_only else "Ready")
+
+    def _refresh_button_labels(self, *, recording: bool) -> None:
+        """Update toolbar labels and footer from current hotkeys."""
+        s = self._settings
+        play_hk = s.display_hotkey("play")
+        rec_hk = s.display_hotkey("record")
+        stop_hk = s.display_hotkey("stop")
+        if recording:
+            self.btn_record.configure(text=f"Stop Rec ({rec_hk})")
+        else:
+            self.btn_record.configure(text=f"Record ({rec_hk})")
+        if not self.player.is_running:
+            self.btn_play.configure(text=f"Play ({play_hk})")
+        else:
+            self.btn_play.configure(text=f"Stop ({play_hk})")
+        self.btn_stop.configure(text=f"Stop ({stop_hk})")
+
+        ocr_bits = ""
+        if s.ocr_enabled:
+            ocr_bits = (
+                f" · {s.display_hotkey('ocr_full')}/{s.display_hotkey('ocr_area')} OCR while recording"
+            )
+        self.hint_label.configure(
+            text=(
+                f"Hotkeys: {play_hk} play · {rec_hk} record · {stop_hk} stop"
+                f"{ocr_bits}  ·  Plain keys are recordable"
+            )
+        )
+        hide_note = (
+            "Hides this window and shows a floating tip."
+            if s.hide_on_record
+            else "Keeps this window visible; floating tip still shows."
+        )
+        tip_ocr = ""
+        if s.ocr_enabled:
+            tip_ocr = (
+                f"\nWhile recording: {s.display_hotkey('ocr_full')} OCR full · "
+                f"{s.display_hotkey('ocr_area')} OCR area."
+            )
+        self._tip_record.set_text(
+            f"Start recording ({rec_hk}). {hide_note}{tip_ocr}\n"
+            "Plain keys are recorded; app hotkeys use the chords in Settings."
+        )
+        self._tip_play.set_text(f"Play / stop the selected preset ({play_hk}).")
+        self._tip_stop.set_text(f"Stop playback and recording ({stop_hk}).")
+
     def _bind_hotkeys(self) -> None:
-        mapping = {
-            "<f8>": lambda: self.after(0, self.toggle_play),
-            "<f9>": lambda: self.after(0, self.toggle_record),
-            "<f10>": lambda: self.after(0, self.stop_all),
+        """Rebuild GlobalHotKeys from current settings."""
+        if self._hotkey_listener is not None:
+            try:
+                self._hotkey_listener.stop()
+            except Exception:
+                pass
+            self._hotkey_listener = None
+
+        actions = {
+            "play": self.toggle_play,
+            "record": self.toggle_record,
+            "stop": self.stop_all,
+            "ocr_full": self._ocr_full,
+            "ocr_area": self._ocr_area,
         }
+        mapping: dict[str, object] = {}
+        for pattern, action_name in self._settings.pynput_hotkeys().items():
+            if action_name.startswith("ocr_") and not self._settings.ocr_enabled:
+                continue
+            handler = actions.get(action_name)
+            if handler is None:
+                continue
+            mapping[pattern] = lambda h=handler: self.after(0, h)
         try:
             self._hotkey_listener = keyboard.GlobalHotKeys(mapping)
             self._hotkey_listener.start()

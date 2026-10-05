@@ -8,3 +8,9 @@ dist/
 build/
 .DS_Store
 Thumbs.db
+
+# User/machine local (next to presets / exe)
+settings.json
+
+# Local vision test fixtures (not for ship)
+templates/_test_tpl.png

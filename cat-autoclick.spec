@@ -3,15 +3,19 @@
 
 from PyInstaller.utils.hooks import collect_all
 
-datas = [("presets", "presets")]
+datas = [("presets", "presets"), ("assets", "assets"), ("templates", "templates")]
 binaries = []
 hiddenimports = []
 
-for pkg in ("customtkinter", "pynput", "screeninfo"):
+# UI / input: full collect. Vision: OpenCV+mss for image find; EasyOCR stays best-effort
+# (prefer run.bat for OCR — models/torch are huge).
+for pkg in ("customtkinter", "pynput", "screeninfo", "mss", "cv2"):
     pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
     datas += pkg_datas
     binaries += pkg_binaries
     hiddenimports += pkg_hidden
+
+hiddenimports += ["numpy", "easyocr"]
 
 a = Analysis(
     ["main.py"],
@@ -37,7 +41,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -51,7 +55,7 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name="CatAutoclick",
 )
