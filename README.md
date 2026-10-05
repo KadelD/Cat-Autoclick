@@ -5,7 +5,7 @@
 [![Release](https://img.shields.io/github/v/release/KadelD/Cat-Autoclick)](https://github.com/KadelD/Cat-Autoclick/releases)
 [![License](https://img.shields.io/github/license/KadelD/Cat-Autoclick)](LICENSE)
 
-> **v1.0.0** — first public release. Prefer **Windows**. macOS/Linux may run with extra input-permission setup.
+> **v1.1.0** — humanized mouse playback via Win32 SendInput. Prefer **Windows**. macOS/Linux may run with extra input-permission setup.
 
 ---
 
