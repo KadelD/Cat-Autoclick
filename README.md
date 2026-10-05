@@ -4,10 +4,34 @@ Desktop macro recorder and player for Windows. Create multiple presets, record o
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.11+ (for source / script launch)
 - Windows recommended (pynput input injection)
 
-## Setup
+## Quick start (scripts)
+
+**Windows**
+
+```bat
+run.bat
+```
+
+**macOS / Linux** (input capture may need permissions)
+
+```bash
+chmod +x run.sh
+./run.sh
+```
+
+## Build Windows .exe
+
+```bat
+build_exe.bat
+```
+
+Output: `dist\CatAutoclick\CatAutoclick.exe`  
+Copy the whole `dist\CatAutoclick\` folder if you move it. Presets are stored in `presets\` next to the exe.
+
+## Manual setup
 
 ```bash
 cd cat-autoclick
@@ -33,6 +57,7 @@ python main.py
 - Monitor selection (coordinates are relative to the chosen display)
 - Loop count (`0` = infinite) and small random jitter
 - Play / Pause / Stop on a background thread
+- `run.bat` / `run.sh` launchers and PyInstaller `.exe` build
 
 ## Notes
 
@@ -44,6 +69,9 @@ python main.py
 
 ```
 main.py
+run.bat / run.sh
+build_exe.bat
+cat-autoclick.spec
 app/
   core/   # models, store, monitors, recorder, player
   ui/     # CustomTkinter windows
@@ -55,4 +83,4 @@ presets/  # saved macros
 - OCR / find text on screen and click
 - Image template matching
 - Conditional wait (color/image)
-- Tray icon and `.exe` packaging
+- Tray icon

@@ -4,11 +4,41 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import sys
 from pathlib import Path
 
 from app.core.models import Preset
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+def project_root() -> Path:
+    """Return the writable app root (repo root, or folder next to the .exe)."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[2]
+
+
+def bundled_presets_dir() -> Path | None:
+    """Return PyInstaller-bundled presets folder when running as a frozen app."""
+    if not getattr(sys, "frozen", False):
+        return None
+    base = Path(getattr(sys, "_MEIPASS", ""))
+    candidate = base / "presets"
+    return candidate if candidate.is_dir() else None
+
+
+def seed_bundled_presets(target: Path) -> None:
+    """Copy bundled demo presets into the writable folder if it has none yet."""
+    if any(target.glob("*.json")):
+        return
+    source = bundled_presets_dir()
+    if source is None:
+        return
+    for path in source.glob("*.json"):
+        shutil.copy2(path, target / path.name)
+
+
+PROJECT_ROOT = project_root()
 PRESETS_DIR = PROJECT_ROOT / "presets"
 
 
@@ -23,6 +53,7 @@ class PresetStore:
     def __init__(self, directory: Path | None = None) -> None:
         self.directory = directory or PRESETS_DIR
         self.directory.mkdir(parents=True, exist_ok=True)
+        seed_bundled_presets(self.directory)
 
     def list_presets(self) -> list[Preset]:
         """Load every *.json preset, sorted by name."""
