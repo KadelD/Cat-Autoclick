@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.core.models import Action, ActionType, ClickPhase, KeyPhase
-from app.ui import theme as T
+from app.ui_ctk import theme as T
 
 
 @dataclass(frozen=True)

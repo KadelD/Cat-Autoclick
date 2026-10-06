@@ -6,7 +6,7 @@ import tkinter as tk
 
 from app.core.monitors import get_monitor
 from app.core.settings import AppSettings, get_settings
-from app.ui import theme as T
+from app.ui_ctk import theme as T
 
 
 class RecordHud:

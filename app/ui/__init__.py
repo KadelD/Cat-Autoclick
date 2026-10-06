@@ -1,1 +1,1 @@
-"""CustomTkinter UI for Cat Autoclick."""
+"""PySide6 UI for Cat Automation Studio."""

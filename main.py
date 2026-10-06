@@ -1,4 +1,4 @@
-"""Entry point for Cat Autoclick."""
+"""Entry point for Cat Automation Studio (PySide6)."""
 
 from app.ui.main_window import run_app
 

@@ -24,6 +24,7 @@ class AppSettings:
     hotkey_ocr_area: str = "ctrl+f7"
     start_minimized: bool = False
     hide_on_record: bool = True
+    hide_on_play: bool = False
     auto_start: bool = False
     ocr_enabled: bool = True
     # Playback: Bezier path + Win32 SendInput (not SetCursorPos) before clicks/moves.

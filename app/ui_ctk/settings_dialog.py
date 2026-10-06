@@ -15,7 +15,7 @@ from app.core.settings import (
     read_auto_start_enabled,
     save_settings,
 )
-from app.ui import theme as T
+from app.ui_ctk import theme as T
 
 ApplyCallback = Callable[[AppSettings], None]
 
@@ -83,6 +83,11 @@ class SettingsDialog(ctk.CTkToplevel):
             body,
             "Hide window while recording (HUD stays visible)",
             self._settings.hide_on_record,
+        )
+        self._hide_play = self._check(
+            body,
+            "Hide window while playing",
+            self._settings.hide_on_play,
         )
 
         self._section(body, "Startup")
@@ -307,6 +312,7 @@ class SettingsDialog(ctk.CTkToplevel):
             hotkey_ocr_area=self._settings.hotkey_ocr_area,
             start_minimized=self._checked(self._start_min),
             hide_on_record=self._checked(self._hide_rec),
+            hide_on_play=self._checked(self._hide_play),
             auto_start=self._checked(self._auto_start),
             ocr_enabled=self._checked(self._ocr),
             humanize_mouse=self._checked(self._humanize),

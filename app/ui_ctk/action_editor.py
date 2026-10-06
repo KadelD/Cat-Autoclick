@@ -20,11 +20,11 @@ from app.core.models import (
 )
 from app.core.monitors import list_monitors
 from app.core.vision import templates_dir
-from app.ui import theme as T
-from app.ui.action_display import row_style
-from app.ui.icons import glyph, material_font
-from app.ui.region_picker import pick_region
-from app.ui.tooltip import HoverTip
+from app.ui_ctk import theme as T
+from app.ui_ctk.action_display import row_style
+from app.ui_ctk.icons import glyph, material_font
+from app.ui_ctk.region_picker import pick_region
+from app.ui_ctk.tooltip import HoverTip
 
 ChangedCallback = Callable[[], None]
 StatusCallback = Callable[[str], None]

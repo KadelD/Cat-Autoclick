@@ -7,7 +7,7 @@ from collections.abc import Callable
 import customtkinter as ctk
 
 from app.core.models import Action, ActionType, MouseButton, OnFail
-from app.ui import theme as T
+from app.ui_ctk import theme as T
 
 OcrCallback = Callable[[Action], None]
 

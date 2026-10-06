@@ -30,6 +30,7 @@ from app.core.settings import get_settings
 from app.core.vision import CaptureSpec, find_template, find_text_boxes, is_ocr_enabled
 
 StatusCallback = Callable[[str], None]
+StepCallback = Callable[[int | None], None]
 
 
 # Map friendly key names to pynput Key members.
@@ -102,8 +103,13 @@ def resolve_key(name: str) -> Any:
 class MacroPlayer:
     """Execute preset actions with stop/pause, vision, and if/else support."""
 
-    def __init__(self, on_status: StatusCallback | None = None) -> None:
+    def __init__(
+        self,
+        on_status: StatusCallback | None = None,
+        on_step: StepCallback | None = None,
+    ) -> None:
         self._on_status = on_status or (lambda _msg: None)
+        self._on_step = on_step or (lambda _idx: None)
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._pause = threading.Event()
@@ -194,6 +200,7 @@ class MacroPlayer:
                     break
         finally:
             self._release_all()
+            self._on_step(None)
             if self._stop.is_set() or aborted:
                 self._on_status("Stopped")
             else:
@@ -216,6 +223,7 @@ class MacroPlayer:
                 continue
 
             action = actions[i]
+            self._on_step(i)
 
             if action.type == ActionType.ELSE:
                 # Executing else-branch body; marker itself is a no-op.

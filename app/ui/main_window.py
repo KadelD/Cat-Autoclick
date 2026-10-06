@@ -1,676 +1,567 @@
-"""Main application window wiring presets, editor, player, and recorder."""
+"""Cat Automation Studio — PySide6 main window."""
+
+
 
 from __future__ import annotations
 
-import customtkinter as ctk
-from pynput import keyboard
+
+
+import sys
+
+
+
+from PySide6.QtCore import Qt
+
+from PySide6.QtGui import QCloseEvent, QKeySequence, QAction
+
+from PySide6.QtWidgets import (
+
+    QApplication,
+
+    QInputDialog,
+
+    QMainWindow,
+
+    QMessageBox,
+
+    QSplitter,
+
+    QStatusBar,
+
+    QWidget,
+
+)
+
+
 
 from app import __version__
-from app.core.models import Action, Preset
-from app.core.monitors import list_monitors
-from app.core.player import MacroPlayer
-from app.core.recorder import MacroRecorder
-from app.core.settings import AppSettings, load_settings
-from app.core.store import PresetStore
-from app.ui import theme as T
-from app.ui.action_editor import ActionEditor
-from app.ui.ocr_capture_dialog import OcrCaptureDialog
-from app.ui.preset_panel import PresetPanel
-from app.ui.record_hud import RecordHud
-from app.ui.region_picker import pick_region
-from app.ui.settings_dialog import SettingsDialog
-from app.ui.theme import apply_app_theme
-from app.ui.tooltip import HoverTip
+
+from app.application.app_controller import AppController
+
+from app.application.app_state import AppState
+
+from app.application.workflow_ops import if_block_span
+
+from app.core.models import ActionType
+
+from app.core.settings import load_settings
+
+from app.ui.layout.inspector_panel import InspectorPanel
+
+from app.ui.layout.sidebar import PresetSidebar
+
+from app.ui.layout.top_bar import TopBar
+
+from app.ui.layout.workflow_panel import WorkflowPanel
+
+from app.ui.dialogs.ocr_capture_dialog import OcrCaptureDialog
+
+from app.ui.dialogs.settings_dialog import SettingsDialog
+
+from app.ui.overlays.record_hud import RecordHud
+
+from app.ui.overlays.region_picker import RegionPickerOverlay
+
+from app.ui.styles.stylesheet import build_stylesheet
 
 
-class MainWindow(ctk.CTk):
-    """Cat Autoclick primary UI."""
 
-    def __init__(self) -> None:
+
+
+class StudioMainWindow(QMainWindow):
+
+    """Three-column automation IDE shell."""
+
+
+
+    def __init__(self, controller: AppController) -> None:
+
         super().__init__()
-        self.title(f"Cat Autoclick {__version__}")
-        self.geometry("1180x760")
-        self.minsize(980, 640)
-        apply_app_theme()
-        self.configure(fg_color=T.BG)
 
-        self._settings = load_settings()
-        self.store = PresetStore()
-        self.store.ensure_default()
-        self._presets = self.store.list_presets()
-        self._current: Preset | None = self._presets[0] if self._presets else None
-        self._dirty_ids: set[str] = set()
-        self._deleted_ids: set[str] = set()
+        self._controller = controller
 
-        self.player = MacroPlayer(on_status=self._status_from_thread)
-        self.recorder = MacroRecorder(
-            on_action=self._action_from_thread,
-            on_status=self._status_from_thread,
-        )
-        self._hotkey_listener: keyboard.GlobalHotKeys | None = None
         self._record_hud: RecordHud | None = None
+
+        self._region_picker: RegionPickerOverlay | None = None
+
         self._ocr_busy = False
-        self._pending_record_actions: list[Action] = []
-        self._record_flush_job: str | None = None
-        self._settings_dialog: SettingsDialog | None = None
-        # Hidden host so OCR dialogs/pickers still show while the main window is withdrawn.
-        self._overlay_host = ctk.CTkToplevel(self)
-        self._overlay_host.withdraw()
 
-        self._build()
-        self._load_monitors()
-        self._apply_settings(self._settings, persist_ui_only=True)
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.setWindowTitle(f"Cat Automation Studio — {__version__}")
 
-        if self._current:
-            self.preset_panel.set_presets(self._presets, self._current.id)
-            self.editor.set_preset(self._current)
-            self._sync_controls_from_preset()
+        self.resize(1440, 900)
 
-        if self._settings.start_minimized:
-            self.after(80, self.iconify)
+        self.setMinimumSize(1100, 700)
 
-    def _menu(self, master: ctk.CTkBaseClass, values: list[str], command=None) -> ctk.CTkOptionMenu:
-        """Create a themed option menu."""
-        return ctk.CTkOptionMenu(
-            master,
-            values=values,
-            command=command,
-            fg_color=T.NAVY,
-            button_color=T.PURPLE_DIM,
-            button_hover_color=T.PURPLE,
-            dropdown_fg_color=T.PANEL,
-            dropdown_hover_color=T.NAVY,
-            text_color=T.WHITE,
-        )
 
-    def _entry(self, master: ctk.CTkBaseClass, width: int = 70) -> ctk.CTkEntry:
-        """Create a themed entry field."""
-        return ctk.CTkEntry(
-            master,
-            width=width,
-            fg_color=T.INPUT,
-            border_color=T.BORDER,
-            text_color=T.WHITE,
-        )
 
-    def _build(self) -> None:
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
+        central = QWidget()
 
-        self.preset_panel = PresetPanel(
-            self,
-            on_select=self._on_select_preset,
-            on_changed=self._on_presets_mutated,
-            width=250,
-        )
-        self.preset_panel.grid(row=0, column=0, sticky="nsw", padx=(14, 8), pady=14)
+        self.setCentralWidget(central)
 
-        center = ctk.CTkFrame(self, fg_color="transparent")
-        center.grid(row=0, column=1, sticky="nsew", padx=(0, 14), pady=14)
-        center.grid_rowconfigure(1, weight=1)
-        center.grid_columnconfigure(0, weight=1)
+        from PySide6.QtWidgets import QVBoxLayout
 
-        top = ctk.CTkFrame(center, fg_color=T.PANEL, corner_radius=14)
-        top.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        top.grid_columnconfigure(3, weight=1)
 
-        brand = ctk.CTkLabel(
-            top,
-            text="Cat Autoclick",
-            font=ctk.CTkFont(size=22, weight="bold"),
-            text_color=T.WHITE,
-        )
-        brand.grid(row=0, column=0, columnspan=2, sticky="w", padx=14, pady=(12, 2))
-        subtitle = ctk.CTkLabel(
-            top,
-            text="Record or build macros · keyboard, mouse, chords & holds",
-            text_color=T.MUTED,
-        )
-        subtitle.grid(row=1, column=0, columnspan=4, sticky="w", padx=14, pady=(0, 8))
 
-        ctk.CTkLabel(top, text="Monitor", text_color=T.MUTED).grid(
-            row=2, column=0, sticky="w", padx=14, pady=6
-        )
-        self.monitor_menu = self._menu(top, ["0"], command=self._on_monitor_change)
-        self.monitor_menu.grid(row=2, column=1, sticky="w", padx=4, pady=6)
+        root = QVBoxLayout(central)
 
-        ctk.CTkLabel(top, text="Loops (0=∞)", text_color=T.MUTED).grid(
-            row=2, column=2, sticky="w", padx=12, pady=6
-        )
-        self.loop_entry = self._entry(top)
-        self.loop_entry.insert(0, "1")
-        self.loop_entry.grid(row=2, column=3, sticky="w", padx=4, pady=6)
-        self.loop_entry.bind("<FocusOut>", lambda _e: self._apply_loop())
+        root.setContentsMargins(0, 0, 0, 0)
 
-        ctk.CTkLabel(top, text="Jitter ms", text_color=T.MUTED).grid(
-            row=3, column=0, sticky="w", padx=14, pady=(6, 12)
-        )
-        self.jitter_entry = self._entry(top)
-        self.jitter_entry.insert(0, "10")
-        self.jitter_entry.grid(row=3, column=1, sticky="w", padx=4, pady=(6, 12))
-        self.jitter_entry.bind("<FocusOut>", lambda _e: self._apply_jitter())
+        root.setSpacing(0)
 
-        self.status_label = ctk.CTkLabel(
-            top,
-            text="Ready",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            text_color=T.CYAN,
-        )
-        self.status_label.grid(row=3, column=2, columnspan=2, sticky="w", padx=12, pady=(6, 12))
 
-        self.editor = ActionEditor(
-            center,
-            on_changed=self._mark_dirty,
-            on_status=self.set_status,
-        )
-        self.editor.grid(row=1, column=0, sticky="nsew")
 
-        bar = ctk.CTkFrame(center, fg_color=T.PANEL, corner_radius=14)
-        bar.grid(row=2, column=0, sticky="ew", pady=(8, 0))
-        self.btn_record = ctk.CTkButton(
-            bar,
-            text="Record",
-            width=140,
-            height=36,
-            fg_color=T.RECORD,
-            hover_color=T.RECORD_HOVER,
-            text_color=T.WHITE,
-            command=self.toggle_record,
-        )
-        self.btn_record.pack(side="left", padx=(12, 6), pady=12)
-        self._tip_record = HoverTip(self.btn_record, "")
-        self.btn_play = ctk.CTkButton(
-            bar,
-            text="Play",
-            width=130,
-            height=36,
-            fg_color=T.CYAN_DIM,
-            hover_color=T.CYAN,
-            text_color=T.BG,
-            command=self.toggle_play,
-        )
-        self.btn_play.pack(side="left", padx=4, pady=12)
-        self._tip_play = HoverTip(self.btn_play, "")
-        self.btn_pause = ctk.CTkButton(
-            bar,
-            text="Pause",
-            width=90,
-            height=36,
-            fg_color=T.NAVY,
-            hover_color=T.PURPLE_DIM,
-            text_color=T.WHITE,
-            command=self._toggle_pause,
-            state="disabled",
-        )
-        self.btn_pause.pack(side="left", padx=4, pady=12)
-        self.btn_stop = ctk.CTkButton(
-            bar,
-            text="Stop",
-            width=130,
-            height=36,
-            fg_color=T.STOP,
-            hover_color=T.STOP_HOVER,
-            text_color=T.WHITE,
-            command=self.stop_all,
-        )
-        self.btn_stop.pack(side="left", padx=4, pady=12)
-        self._tip_stop = HoverTip(self.btn_stop, "")
-        ctk.CTkButton(
-            bar,
-            text="Save",
-            width=90,
-            height=36,
-            fg_color=T.PURPLE,
-            hover_color=T.PURPLE_DIM,
-            text_color=T.WHITE,
-            command=self.save_all,
-        ).pack(side="right", padx=(6, 12), pady=12)
-        ctk.CTkButton(
-            bar,
-            text="Settings",
-            width=90,
-            height=36,
-            fg_color=T.NAVY,
-            hover_color=T.PURPLE_DIM,
-            text_color=T.WHITE,
-            command=self._open_settings,
-        ).pack(side="right", padx=(12, 0), pady=12)
+        self.top_bar = TopBar()
 
-        self.hint_label = ctk.CTkLabel(
-            center,
-            text="",
-            text_color=T.MUTED,
-            font=ctk.CTkFont(size=11),
-        )
-        self.hint_label.grid(row=3, column=0, sticky="w", pady=(8, 0), padx=4)
+        root.addWidget(self.top_bar)
 
-    def _load_monitors(self) -> None:
-        monitors = list_monitors()
-        labels = [m.label for m in monitors]
-        self._monitor_labels = labels
-        self.monitor_menu.configure(values=labels)
-        idx = self._current.monitor_index if self._current else 0
-        if 0 <= idx < len(labels):
-            self.monitor_menu.set(labels[idx])
+
+
+        split = QSplitter(Qt.Horizontal)
+
+        self.sidebar = PresetSidebar()
+
+        self.workflow = WorkflowPanel(controller.macros)
+
+        self.inspector = InspectorPanel()
+
+        split.addWidget(self.sidebar)
+
+        split.addWidget(self.workflow)
+
+        split.addWidget(self.inspector)
+
+        split.setStretchFactor(0, 0)
+
+        split.setStretchFactor(1, 1)
+
+        split.setStretchFactor(2, 0)
+
+        split.setSizes([260, 820, 320])
+
+        root.addWidget(split, stretch=1)
+
+
+
+        status = QStatusBar()
+
+        self.setStatusBar(status)
+
+        status.showMessage("Ready")
+
+
+
+        self._wire()
+
+        self._refresh_presets()
+
+        if controller.macros.current:
+
+            self.workflow.load_preset()
+
+        controller.initialize()
+
+        controller.state_changed.connect(self.top_bar.set_app_state)
+
+        controller.state_changed.connect(self._on_state)
+
+        controller.status_message.connect(status.showMessage)
+
+        controller.error_message.connect(self._show_error)
+
+        controller.macros.presets_changed.connect(self._refresh_presets)
+
+        controller.macros.preset_selected.connect(lambda _p: self.workflow.load_preset())
+
+        controller.macros.macro_changed.connect(lambda _p: self.workflow.load_preset())
+
+        controller.macros.dirty_changed.connect(self._update_title)
+
+        controller.macros.selection_changed.connect(self._on_selection_changed)
+
+        controller.recording.action_captured.connect(lambda _a: self.workflow.load_preset())
+
+        controller.playback.execution_step_changed.connect(self.workflow.set_execution_step)
+
+        controller.macros.step_updated.connect(self._refresh_inspector)
+
+        controller.recording.started.connect(self._show_record_hud)
+
+        controller.recording.stopped.connect(self._hide_record_hud)
+
+        controller.recording.status.connect(self._record_hud_status)
+
+        controller.ocr_full_requested.connect(lambda: self._begin_ocr_capture(full=True))
+
+        controller.ocr_area_requested.connect(lambda: self._begin_ocr_capture(full=False))
+
+
+
+        self.top_bar.set_app_state(AppState.IDLE)
+
+        settings = load_settings()
+
+        if settings.start_minimized:
+
+            self.showMinimized()
+
         else:
-            self.monitor_menu.set(labels[0])
 
-    def _monitor_index_from_menu(self) -> int:
-        value = self.monitor_menu.get()
-        try:
-            return int(value.split(":", 1)[0])
-        except ValueError:
-            return 0
+            self.show()
 
-    def _on_monitor_change(self, _value: str) -> None:
-        if self._current is None:
+
+
+    def _wire(self) -> None:
+
+        c = self._controller
+
+        self.top_bar.record_clicked.connect(c.toggle_record)
+
+        self.top_bar.run_clicked.connect(c.toggle_play)
+
+        self.top_bar.pause_clicked.connect(c.playback.toggle_pause)
+
+        self.top_bar.stop_clicked.connect(c.stop_all)
+
+        self.top_bar.macro_changed.connect(c.macros.select)
+
+        self.top_bar.macro_changed.connect(lambda _id: self.workflow.load_preset())
+
+
+
+        self.sidebar.preset_selected.connect(c.macros.select)
+
+        self.sidebar.preset_selected.connect(lambda _id: self.workflow.load_preset())
+
+        self.sidebar.new_macro_requested.connect(self._new_macro)
+
+
+
+        self.workflow.save_requested.connect(c.macros.save_all)
+
+        self.workflow.step_selected.connect(self._on_step_selected)
+
+        self.workflow.record_requested.connect(c.toggle_record)
+
+        self.inspector.delete_requested.connect(self._delete_step)
+
+        self.inspector.save_action.connect(self._save_step)
+
+        self.inspector.pick_region.connect(self._pick_region)
+
+        self.top_bar.settings_clicked.connect(self._open_settings)
+
+
+
+        save_action = QAction("Save", self)
+
+        save_action.setShortcut(QKeySequence.Save)
+
+        save_action.triggered.connect(c.macros.save_all)
+
+        self.addAction(save_action)
+
+
+
+    def _refresh_presets(self) -> None:
+
+        presets = self._controller.macros.presets
+
+        names = [p.name for p in presets]
+
+        ids = [p.id for p in presets]
+
+        cur = self._controller.macros.current
+
+        self.sidebar.set_presets(names, ids, cur.id if cur else None)
+
+        self.top_bar.set_macros(names, cur.id if cur else None, ids)
+
+        self._update_title(self._controller.macros.is_dirty)
+
+
+
+    def _update_title(self, dirty: bool) -> None:
+
+        base = f"Cat Automation Studio — {__version__}"
+
+        preset = self._controller.macros.current
+
+        if preset:
+
+            base = f"{base} — {preset.name}"
+
+        if dirty:
+
+            base += " *"
+
+        self.setWindowTitle(base)
+
+
+
+    def _on_state(self, state: AppState) -> None:
+        settings = self._controller.settings
+        if state == AppState.RECORDING and settings.hide_on_record:
+            self.hide()
             return
-        self._current.monitor_index = self._monitor_index_from_menu()
-        self._mark_dirty()
-
-    def _apply_loop(self) -> None:
-        if self._current is None:
+        if state == AppState.PLAYING and settings.hide_on_play:
+            self.hide()
             return
-        try:
-            self._current.loop_count = int(self.loop_entry.get().strip())
-        except ValueError:
-            self._current.loop_count = 1
-            self.loop_entry.delete(0, "end")
-            self.loop_entry.insert(0, "1")
-        self._mark_dirty()
+        # Show again when idle, paused, or when hide_* is off for current mode.
+        if state in (AppState.IDLE, AppState.PAUSED) or (
+            state == AppState.PLAYING and not settings.hide_on_play
+        ):
+            if not self.isVisible():
+                self.show()
+                self.raise_()
+                self.activateWindow()
 
-    def _apply_jitter(self) -> None:
-        if self._current is None:
-            return
-        try:
-            self._current.jitter_ms = max(0, int(self.jitter_entry.get().strip()))
-        except ValueError:
-            self._current.jitter_ms = 10
-            self.jitter_entry.delete(0, "end")
-            self.jitter_entry.insert(0, "10")
-        self._mark_dirty()
 
-    def _sync_controls_from_preset(self) -> None:
-        if self._current is None:
-            return
-        self.loop_entry.delete(0, "end")
-        self.loop_entry.insert(0, str(self._current.loop_count))
-        self.jitter_entry.delete(0, "end")
-        self.jitter_entry.insert(0, str(self._current.jitter_ms))
-        labels = getattr(self, "_monitor_labels", None) or self.monitor_menu.cget("values")
-        idx = self._current.monitor_index
-        if labels and 0 <= idx < len(labels):
-            self.monitor_menu.set(labels[idx])
 
-    def _on_select_preset(self, preset: Preset | None) -> None:
-        self._apply_loop()
-        self._apply_jitter()
-        self._current = preset
-        self.editor.set_preset(preset)
-        self._sync_controls_from_preset()
-        self.set_status("Ready" if preset else "No preset")
+    def _new_macro(self) -> None:
 
-    def _on_presets_mutated(self) -> None:
-        self._presets = self.preset_panel.presets
-        disk_ids = {p.id for p in self.store.list_presets()}
-        live_ids = {p.id for p in self._presets}
-        self._deleted_ids |= disk_ids - live_ids
-        for p in self._presets:
-            self._dirty_ids.add(p.id)
-        self._current = self.preset_panel.selected()
-        self.editor.set_preset(self._current)
-        self._sync_controls_from_preset()
+        name, ok = QInputDialog.getText(self, "New Macro", "Name:")
 
-    def _mark_dirty(self) -> None:
-        if self._current is not None:
-            self._dirty_ids.add(self._current.id)
+        if ok and name.strip():
 
-    def save_all(self) -> None:
-        self._apply_loop()
-        self._apply_jitter()
-        if self._current is not None:
-            self._current.monitor_index = self._monitor_index_from_menu()
-        for preset_id in list(self._deleted_ids):
-            self.store.delete(preset_id)
-        self._deleted_ids.clear()
-        for preset in self._presets:
-            self.store.save(preset)
-        self._dirty_ids.clear()
-        selected = self._current.id if self._current else None
-        self._presets = self.store.list_presets()
-        self.preset_panel.set_presets(self._presets, selected)
-        self._current = self.preset_panel.selected()
-        self.editor.set_preset(self._current)
-        self.set_status("Saved")
+            self._controller.macros.create_preset(name.strip())
 
-    def set_status(self, message: str) -> None:
-        self.status_label.configure(text=message)
+            self.workflow.load_preset()
+
+
+
+    def _on_step_selected(self, index: int) -> None:
+
+        preset = self._controller.macros.current
+
+        if preset and 0 <= index < len(preset.actions):
+
+            self.inspector.show_action(index, preset.actions[index])
+
+
+
+    def _on_selection_changed(self, index: object) -> None:
+
+        if index is None:
+
+            self.inspector.clear()
+
+
+
+    def _save_step(self, index: int, action) -> None:
+        self._controller.macros.update_step(index, action)
+
+    def _refresh_inspector(self, index: int) -> None:
+        preset = self._controller.macros.current
+        if preset and self._controller.macros.selected_step_index == index:
+            if 0 <= index < len(preset.actions):
+                self.inspector.show_action(index, preset.actions[index])
+
+    def _show_record_hud(self) -> None:
+        preset = self._controller.macros.current
+        mon = preset.monitor_index if preset else 0
+        self._hide_record_hud()
+        self._record_hud = RecordHud(mon, self._controller.settings)
+        self._record_hud.show_hud()
+
+    def _hide_record_hud(self) -> None:
+        if self._record_hud is not None:
+            self._record_hud.close()
+            self._record_hud = None
+
+    def _record_hud_status(self, message: str) -> None:
         if self._record_hud is not None:
             self._record_hud.set_status(message)
 
-    def _status_from_thread(self, message: str) -> None:
-        def _apply() -> None:
-            self.set_status(message)
-            if message in ("Finished", "Stopped") or message.startswith("Hotkeys"):
-                self._set_play_idle()
-
-        self.after(0, _apply)
-
-    def _action_from_thread(self, action: Action) -> None:
-        """Batch recorded actions onto the UI thread (~60fps) to avoid scroll lag."""
-        self._pending_record_actions.append(action)
-        if self._record_flush_job is None:
-            self._record_flush_job = self.after(16, self._flush_recorded_actions)
-
-    def _flush_recorded_actions(self) -> None:
-        """Append queued recorder actions in one UI tick."""
-        self._record_flush_job = None
-        batch = self._pending_record_actions
-        self._pending_record_actions = []
-        for action in batch:
-            self.editor.append_action(action)
-
-    def _show_record_ui(self) -> None:
-        """Show floating record HUD; optionally hide the main window."""
-        mon = self._current.monitor_index if self._current else 0
-        self._destroy_record_hud()
-        self._record_hud = RecordHud(self, mon, settings=self._settings)
-        if self._settings.hide_on_record:
-            self.withdraw()
-
-    def _restore_main_ui(self) -> None:
-        """Bring the main window back after recording ends."""
-        self._destroy_record_hud()
-        try:
-            self.deiconify()
-            self.lift()
-            self.focus_force()
-        except Exception:
-            pass
-
-    def _destroy_record_hud(self) -> None:
-        if self._record_hud is not None:
-            self._record_hud.destroy()
-            self._record_hud = None
-
-    def _end_record_session(self) -> None:
-        """Stop recorder listeners and restore the main window."""
-        if self.recorder.is_recording:
-            self.recorder.stop()
-        self._refresh_button_labels(recording=False)
-        self._ocr_busy = False
-        self._restore_main_ui()
-
-    def toggle_record(self) -> None:
-        if self.recorder.is_recording:
-            self._end_record_session()
-            return
-        if self.player.is_running:
-            self.player.stop()
-        if self._current is None:
-            self.set_status("Create a preset first")
-            return
-        self._apply_loop()
-        # Chord hotkeys are swallowed by the recorder; do not ignore plain keys.
-        self.recorder.set_ignore_hotkeys([])
-        self.recorder.start(self._current.monitor_index)
-        self._refresh_button_labels(recording=True)
-        self._show_record_ui()
-        self.set_status("Recording…")
-
-    def toggle_play(self) -> None:
-        if self.player.is_running:
-            self.player.stop()
-            self._set_play_idle()
-            return
-        if self.recorder.is_recording:
-            self._end_record_session()
-        if self._current is None:
-            self.set_status("No preset selected")
-            return
-        self._apply_loop()
-        self._apply_jitter()
-        self._current.monitor_index = self._monitor_index_from_menu()
-        self.player.play(self._current)
-        play_hk = self._settings.display_hotkey("play")
-        self.btn_play.configure(
-            text=f"Stop ({play_hk})",
-            fg_color=T.NAVY,
-            hover_color=T.PURPLE_DIM,
-            text_color=T.WHITE,
-        )
-        self._sync_pause_button()
-
-    def _toggle_pause(self) -> None:
-        """Pause/resume playback; ignored when idle."""
-        if not self.player.is_running:
-            return
-        self.player.toggle_pause()
-        self._sync_pause_button()
-
-    def _sync_pause_button(self) -> None:
-        """Enable Pause only while playing; flip label when paused."""
-        if not self.player.is_running:
-            self.btn_pause.configure(text="Pause", state="disabled")
-            return
-        self.btn_pause.configure(
-            text="Resume" if self.player.is_paused else "Pause",
-            state="normal",
+    def _open_settings(self) -> None:
+        SettingsDialog.open_settings(
+            self._controller.settings,
+            self._controller.apply_settings,
+            self,
         )
 
-    def _set_play_idle(self) -> None:
-        """Reset Play button to the idle cyan style."""
-        play_hk = self._settings.display_hotkey("play")
-        self.btn_play.configure(
-            text=f"Play ({play_hk})",
-            fg_color=T.CYAN_DIM,
-            hover_color=T.CYAN,
-            text_color=T.BG,
-        )
-        self._sync_pause_button()
+    def _close_region_picker(self) -> None:
+        """Destroy any active region overlay so it cannot trap the desktop."""
+        picker = self._region_picker
+        self._region_picker = None
+        if picker is not None:
+            try:
+                picker.close()
+            except Exception:
+                pass
 
-    def stop_all(self) -> None:
-        if self.recorder.is_recording:
-            self._end_record_session()
-        if self.player.is_running:
-            self.player.stop()
-        self._set_play_idle()
-        self.set_status("Stopped")
-
-    def _ocr_full(self) -> None:
-        """Insert OCR step for the full preset monitor (while recording)."""
-        if not self._settings.ocr_enabled:
-            self.set_status("OCR is disabled in Settings")
+    def _pick_region(self, _step_index: int) -> None:
+        """Open region picker for inspector; keep a strong reference until closed."""
+        preset = self._controller.macros.current
+        if preset is None:
             return
-        self._begin_ocr_capture(full=True)
+        self._close_region_picker()
+        picker = RegionPickerOverlay(preset.monitor_index)
+        self._region_picker = picker
 
-    def _ocr_area(self) -> None:
-        """Pick a region then insert an OCR step (while recording)."""
-        if not self._settings.ocr_enabled:
-            self.set_status("OCR is disabled in Settings")
-            return
-        self._begin_ocr_capture(full=False)
+        def _done(x: int, y: int, w: int, h: int) -> None:
+            self.inspector.apply_region(x, y, w, h)
+            self._region_picker = None
 
-    def _begin_ocr_capture(self, full: bool) -> None:
-        if not self.recorder.is_recording or self._ocr_busy or self._current is None:
+        def _cancel() -> None:
+            self._region_picker = None
+
+        picker.region_selected.connect(_done)
+        picker.cancelled.connect(_cancel)
+        picker.destroyed.connect(lambda *_: setattr(self, "_region_picker", None))
+        picker.show_picker()
+
+    def _begin_ocr_capture(self, *, full: bool) -> None:
+        """Pause recording and add an OCR step (hotkey while recording)."""
+        c = self._controller
+        if not c.recording.is_recording or self._ocr_busy or c.macros.current is None:
             return
         self._ocr_busy = True
-        self.recorder.pause()
-        mon = self._current.monitor_index
-        if self._record_hud is not None:
-            self._record_hud.set_status("OCR setup…")
-
+        c.recording.pause()
+        self._record_hud_status("OCR setup…")
+        mon = c.macros.current.monitor_index
         if full:
             self._open_ocr_dialog(mon, 0, 0, 0, 0)
             return
 
+        self._close_region_picker()
+        picker = RegionPickerOverlay(mon)
+        self._region_picker = picker
+
         def _done(x: int, y: int, w: int, h: int) -> None:
+            self._region_picker = None
             self._open_ocr_dialog(mon, x, y, w, h)
 
         def _cancel() -> None:
+            self._region_picker = None
             self._finish_ocr_flow(resume=True)
-            if self._record_hud is not None:
-                self._record_hud.set_status("Recording…")
+            self._record_hud_status("Recording…")
 
-        pick_region(self._overlay_host, mon, on_done=_done, on_cancel=_cancel)
+        picker.region_selected.connect(_done)
+        picker.cancelled.connect(_cancel)
+        picker.destroyed.connect(lambda *_: setattr(self, "_region_picker", None))
+        picker.show_picker()
 
     def _open_ocr_dialog(
         self, monitor_index: int, rx: int, ry: int, rw: int, rh: int
     ) -> None:
-        """Show OCR settings; clicks/keys here are ignored by the paused recorder."""
+        """Show OCR settings; recorder stays paused until dialog closes."""
 
-        def _ok(action: Action) -> None:
-            self.editor.append_action(action)
-            self._mark_dirty()
-            self._finish_ocr_flow(resume=True)
-            if self._record_hud is not None:
-                self._record_hud.set_status("Recording…")
-            self.set_status(f"Added OCR: {action.summary()}")
+        def _ok(action) -> None:
+            self._controller.macros.append_action(action)
+            self.workflow.load_preset()
+            self.statusBar().showMessage(f"Added OCR: {action.summary()}")
 
-        def _cancel() -> None:
-            self._finish_ocr_flow(resume=True)
-            if self._record_hud is not None:
-                self._record_hud.set_status("Recording…")
-
-        OcrCaptureDialog(
-            self._overlay_host,
+        OcrCaptureDialog.run(
             monitor_index=monitor_index,
             region_x=rx,
             region_y=ry,
             region_w=rw,
             region_h=rh,
             on_ok=_ok,
-            on_cancel=_cancel,
+            parent=self,
         )
+        self._finish_ocr_flow(resume=True)
+        self._record_hud_status("Recording…")
 
     def _finish_ocr_flow(self, resume: bool) -> None:
         self._ocr_busy = False
-        if resume and self.recorder.is_recording:
-            self.recorder.resume()
+        if resume and self._controller.recording.is_recording:
+            self._controller.recording.resume()
 
-    def _open_settings(self) -> None:
-        """Open the app Settings dialog (single instance)."""
-        try:
-            if self._settings_dialog is not None and self._settings_dialog.winfo_exists():
-                self._settings_dialog.lift()
-                self._settings_dialog.focus_force()
+    def _delete_step(self, index: int) -> None:
+
+        preset = self._controller.macros.current
+
+        if preset is None or not (0 <= index < len(preset.actions)):
+
+            return
+
+        actions = preset.actions
+
+        if actions[index].type in (ActionType.IF_TEXT, ActionType.IF_IMAGE):
+
+            span = if_block_span(actions, index)
+
+            count = span[1] - span[0] + 1
+
+            box = QMessageBox(self)
+
+            box.setWindowTitle("Delete condition")
+
+            box.setText(f"Delete this If block and all {count} steps inside it?")
+
+            box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+
+            if box.exec() != QMessageBox.Yes:
+
                 return
-        except Exception:
-            self._settings_dialog = None
-        self._settings_dialog = SettingsDialog(
-            self,
-            self._settings,
-            on_apply=self._on_settings_saved,
-        )
 
-    def _on_settings_saved(self, settings: AppSettings) -> None:
-        """Apply newly saved settings to listeners and UI."""
-        self._settings_dialog = None
-        self._apply_settings(settings)
+        self._controller.macros.delete_step(index)
 
-    def _apply_settings(self, settings: AppSettings, *, persist_ui_only: bool = False) -> None:
-        """Rebuild hotkeys, labels, OCR gates, and recorder swallow list."""
-        self._settings = settings
-        if not persist_ui_only:
-            # Cache already updated by save_settings; keep local reference.
-            pass
-        self.editor.set_ocr_enabled(settings.ocr_enabled)
-        chords = list(settings.hotkey_map().values())
-        if not settings.ocr_enabled:
-            chords = [
-                settings.hotkey_map()["play"],
-                settings.hotkey_map()["record"],
-                settings.hotkey_map()["stop"],
-            ]
-        self.recorder.set_app_hotkeys(chords)
-        self._refresh_button_labels(recording=self.recorder.is_recording)
-        self._bind_hotkeys()
-        self.set_status("Settings saved" if not persist_ui_only else "Ready")
+        self.inspector.clear()
 
-    def _refresh_button_labels(self, *, recording: bool) -> None:
-        """Update toolbar labels and footer from current hotkeys."""
-        s = self._settings
-        play_hk = s.display_hotkey("play")
-        rec_hk = s.display_hotkey("record")
-        stop_hk = s.display_hotkey("stop")
-        if recording:
-            self.btn_record.configure(text=f"Stop Rec ({rec_hk})")
-        else:
-            self.btn_record.configure(text=f"Record ({rec_hk})")
-        if not self.player.is_running:
-            self.btn_play.configure(text=f"Play ({play_hk})")
-        else:
-            self.btn_play.configure(text=f"Stop ({play_hk})")
-        self.btn_stop.configure(text=f"Stop ({stop_hk})")
 
-        ocr_bits = ""
-        if s.ocr_enabled:
-            ocr_bits = (
-                f" · {s.display_hotkey('ocr_full')}/{s.display_hotkey('ocr_area')} OCR while recording"
-            )
-        self.hint_label.configure(
-            text=(
-                f"Hotkeys: {play_hk} play · {rec_hk} record · {stop_hk} stop"
-                f"{ocr_bits}  ·  Plain keys are recordable"
-            )
-        )
-        hide_note = (
-            "Hides this window and shows a floating tip."
-            if s.hide_on_record
-            else "Keeps this window visible; floating tip still shows."
-        )
-        tip_ocr = ""
-        if s.ocr_enabled:
-            tip_ocr = (
-                f"\nWhile recording: {s.display_hotkey('ocr_full')} OCR full · "
-                f"{s.display_hotkey('ocr_area')} OCR area."
-            )
-        self._tip_record.set_text(
-            f"Start recording ({rec_hk}). {hide_note}{tip_ocr}\n"
-            "Plain keys are recorded; app hotkeys use the chords in Settings."
-        )
-        self._tip_play.set_text(f"Play / stop the selected preset ({play_hk}).")
-        self._tip_stop.set_text(f"Stop playback and recording ({stop_hk}).")
 
-    def _bind_hotkeys(self) -> None:
-        """Rebuild GlobalHotKeys from current settings."""
-        if self._hotkey_listener is not None:
-            try:
-                self._hotkey_listener.stop()
-            except Exception:
-                pass
-            self._hotkey_listener = None
+    def _show_error(self, message: str) -> None:
 
-        actions = {
-            "play": self.toggle_play,
-            "record": self.toggle_record,
-            "stop": self.stop_all,
-            "ocr_full": self._ocr_full,
-            "ocr_area": self._ocr_area,
-        }
-        mapping: dict[str, object] = {}
-        for pattern, action_name in self._settings.pynput_hotkeys().items():
-            if action_name.startswith("ocr_") and not self._settings.ocr_enabled:
-                continue
-            handler = actions.get(action_name)
-            if handler is None:
-                continue
-            mapping[pattern] = lambda h=handler: self.after(0, h)
-        try:
-            self._hotkey_listener = keyboard.GlobalHotKeys(mapping)
-            self._hotkey_listener.start()
-        except Exception as exc:
-            self.set_status(f"Hotkeys unavailable: {exc}")
+        QMessageBox.warning(self, "Cat Automation Studio", message)
 
-    def _on_close(self) -> None:
-        self.stop_all()
-        if self._hotkey_listener is not None:
-            self._hotkey_listener.stop()
-        self.destroy()
+
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        self._close_region_picker()
+        self._hide_record_hud()
+
+        if self._controller.macros.is_dirty:
+
+            box = QMessageBox(self)
+
+            box.setWindowTitle("Unsaved changes")
+
+            box.setText("You have unsaved changes.")
+
+            save = box.addButton("Save", QMessageBox.AcceptRole)
+
+            discard = box.addButton("Don't Save", QMessageBox.DestructiveRole)
+
+            cancel = box.addButton("Cancel", QMessageBox.RejectRole)
+
+            box.exec()
+
+            clicked = box.clickedButton()
+
+            if clicked == cancel:
+
+                event.ignore()
+
+                return
+
+            if clicked == save:
+
+                self._controller.macros.save_all()
+
+        self._controller.shutdown()
+
+        event.accept()
+
+
+
 
 
 def run_app() -> None:
-    """Launch the Cat Autoclick UI."""
-    app = MainWindow()
-    app.mainloop()
+
+    """Launch Cat Automation Studio (PySide6)."""
+
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    app.setStyle("Fusion")
+
+    app.setStyleSheet(build_stylesheet())
+
+    controller = AppController()
+
+    window = StudioMainWindow(controller)
+
+    sys.exit(app.exec())
+
+

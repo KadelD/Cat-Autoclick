@@ -1,6 +1,8 @@
-# Cat Autoclick
+# Cat Autoclick / Cat Automation Studio
 
 **Desktop macro recorder & player for Windows** — record keyboard and mouse, build steps by hand, find text (Thai + English OCR) or images on screen, and branch with if/else.
+
+The default UI is **Cat Automation Studio** (PySide6 IDE layout). The previous CustomTkinter UI remains available as `python main_ctk.py` during migration — see [`docs/MIGRATION_UI.md`](docs/MIGRATION_UI.md).
 
 [![Release](https://img.shields.io/github/v/release/KadelD/Cat-Autoclick)](https://github.com/KadelD/Cat-Autoclick/releases)
 [![License](https://img.shields.io/github/license/KadelD/Cat-Autoclick)](LICENSE)
@@ -37,6 +39,8 @@
 ```bat
 run.bat
 ```
+
+Studio UI (PySide6): `python main.py` · Legacy UI: `python main_ctk.py`
 
 **macOS / Linux** (input capture may need OS permissions)
 

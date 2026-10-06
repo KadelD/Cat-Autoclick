@@ -8,7 +8,7 @@ from uuid import uuid4
 import customtkinter as ctk
 
 from app.core.models import Preset
-from app.ui import theme as T
+from app.ui_ctk import theme as T
 
 SelectCallback = Callable[[Preset | None], None]
 MutateCallback = Callable[[], None]
